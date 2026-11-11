@@ -1,10 +1,10 @@
 {
-  "name": "@shooter/client",
+  "name": "@hitscan/client",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "dependencies": {
-    "@shooter/shared": "*",
+    "@hitscan/shared": "*",
     "three": "^0.187.0"
   }
 }

@@ -1,4 +1,4 @@
-import type { Input } from '@shooter/shared';
+import type { Input } from '@hitscan/shared';
 
 const SENSITIVITY = 0.0022; // radians per mouse pixel
 const PITCH_LIMIT = Math.PI / 2 - 0.01;

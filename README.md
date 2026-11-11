@@ -1,6 +1,6 @@
-# Shooter
+# Hitscan
 
-A multiplayer 3D shooter that runs in the browser. TypeScript, Three.js, an authoritative server
+Hitscan is a multiplayer 3D arena shooter that runs in the browser. TypeScript, Three.js, an authoritative server
 (coming in Stage 2). See the roadmap doc for the full plan.
 
 **Status: Stage 1** - movement, slide and the first map, played locally (no server yet).

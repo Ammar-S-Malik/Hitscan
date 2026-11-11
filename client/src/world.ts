@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { BoxKind, GameMap } from '@shooter/shared';
+import type { BoxKind, GameMap } from '@hitscan/shared';
 
 const COLORS: Record<BoxKind, number> = {
   floor: 0x4a5663,

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { BODY, DT, createPlayer, eyeHeight, parseMap, step } from '@shooter/shared';
-import type { PlayerState } from '@shooter/shared';
+import { BODY, DT, createPlayer, eyeHeight, parseMap, step } from '@hitscan/shared';
+import type { PlayerState } from '@hitscan/shared';
 import arena from '../../shared/maps/arena1.json';
 import { InputState } from './input.ts';
 import { buildWorld } from './world.ts';

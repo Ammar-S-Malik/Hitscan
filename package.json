@@ -1,5 +1,5 @@
 {
-  "name": "shooter",
+  "name": "hitscan",
   "private": true,
   "type": "module",
   "workspaces": [
