@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import {
   BODY, DT, FireControl, Interpolator, NET, Predictor, WEAPONS, aimDirection, createPlayer, decodeServerMessage,
-  eyeHeight, parseMap, parseServerMessage, pelletDirections, shotSeed, step, traceShot, weaponOf,
+  eyeHeight, isColliding, parseMap, parseServerMessage, pelletDirections, shotSeed, step, traceShot, weaponOf,
 } from '@hitscan/shared';
 import type { Input, MatchInfo, MatchPhase, PlayerState, RemotePlayer, ShotEvent, Snapshot, Target, Vec3 } from '@hitscan/shared';
 import { GameAudio } from './audio.ts';
@@ -653,9 +653,15 @@ function frame(now: number): void {
   const offX = live ? predictor!.errX : 0;
   const offY = live ? predictor!.errY : 0;
   const offZ = live ? predictor!.errZ : 0;
-  const x = drawPrev.x + (drawCur.x - drawPrev.x) * a + offX;
-  const y = drawPrev.y + (drawCur.y - drawPrev.y) * a + offY;
-  const z = drawPrev.z + (drawCur.z - drawPrev.z) * a + offZ;
+  let x = drawPrev.x + (drawCur.x - drawPrev.x) * a + offX;
+  let y = drawPrev.y + (drawCur.y - drawPrev.y) * a + offY;
+  let z = drawPrev.z + (drawCur.z - drawPrev.z) * a + offZ;
+  // The smoothed correction offset can briefly push the drawn camera into a wall; if so, draw the true position instead.
+  if ((offX !== 0 || offY !== 0 || offZ !== 0) && isColliding({ ...drawCur, x, y, z }, boxes)) {
+    x -= offX;
+    y -= offY;
+    z -= offZ;
+  }
 
   eye += (eyeHeight(drawCur) - eye) * (1 - Math.exp(-frameDt * 18));
   camera.position.set(x, y + eye, z);

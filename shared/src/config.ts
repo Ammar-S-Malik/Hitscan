@@ -97,13 +97,13 @@ export const WEAPONS: readonly WeaponDef[] = [
     switchTicks: 10, adsFov: 62, scope: false, recoil: 0.012,
   },
   {
-    name: 'SMG', damage: 12, pellets: 1, headMultiplier: 1.5, intervalTicks: 4, auto: true,
-    spread: 0.03, adsSpread: 0.012, falloffStart: 15, falloffEnd: 45, falloffMin: 0.5,
+    name: 'SMG', damage: 15, pellets: 1, headMultiplier: 1.5, intervalTicks: 4, auto: true,
+    spread: 0.022, adsSpread: 0.008, falloffStart: 20, falloffEnd: 55, falloffMin: 0.6,
     switchTicks: 12, adsFov: 64, scope: false, recoil: 0.006,
   },
   {
-    name: 'Shotgun', damage: 12, pellets: 8, headMultiplier: 1.5, intervalTicks: 48, auto: false,
-    spread: 0.07, adsSpread: 0.05, falloffStart: 8, falloffEnd: 25, falloffMin: 0.15,
+    name: 'Shotgun', damage: 15, pellets: 8, headMultiplier: 1.5, intervalTicks: 40, auto: false,
+    spread: 0.055, adsSpread: 0.035, falloffStart: 10, falloffEnd: 30, falloffMin: 0.2,
     switchTicks: 20, adsFov: 66, scope: false, recoil: 0.04,
   },
   {

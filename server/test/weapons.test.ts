@@ -69,7 +69,7 @@ test('the shotgun fires eight pellets per shot, and each ray is reported', () =>
   const hits = shot.filter((e) => e.victim === d.b.id);
   assert.ok(hits.length >= 4, `${hits.length} pellets hit at 6 m`);
   assert.equal(new Set(shot.map((e) => e.end.join(','))).size, shot.length, 'the pellets scatter');
-  assert.equal(d.health(), COMBAT.maxHealth - hits.reduce((n, e) => n + e.damage, 0));
+  assert.equal(d.health(), Math.max(0, COMBAT.maxHealth - hits.reduce((n, e) => n + e.damage, 0)));
 });
 
 test('shotgun damage falls off hard with distance', () => {
