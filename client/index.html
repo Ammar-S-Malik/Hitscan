@@ -73,6 +73,15 @@
       #endscreen b { font-size: 20px; }
       #pause-actions { margin-top: 14px; display: flex; gap: 12px; justify-content: center; align-items: center; }
       #pause-actions label { font-size: 13px; color: #cfd8e3; display: flex; gap: 6px; align-items: center; }
+      #minimap { position: fixed; right: 12px; top: 12px; display: none; border-radius: 6px; pointer-events: none; }
+      #pause-menu .hint, #controls-list { color: #cfd8e3; font-size: 13px; }
+      #controls-list { margin: 10px 0 4px; line-height: 2; }
+      #settings-back { margin-top: 16px; }
+      #settings-panel, #pause-menu { cursor: default; }
+      #settings { margin: 14px auto 0; display: grid; grid-template-columns: auto auto; gap: 6px 18px; justify-content: center; text-align: left;
+                  font-size: 13px; color: #cfd8e3; cursor: default; }
+      #settings label { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
+      #settings span { min-width: 38px; text-align: right; font-family: ui-monospace, Consolas, monospace; }
       #overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center;
                  color: #fff; background: rgba(10,12,16,.6); cursor: pointer; font-size: 16px; line-height: 1.8; }
       #overlay b { font-size: 24px; }
@@ -81,6 +90,7 @@
   </head>
   <body>
     <div id="hud"></div>
+    <canvas id="minimap"></canvas>
     <div id="vignette"></div>
     <div id="scope"></div>
     <div id="crosshair"></div>
@@ -118,16 +128,32 @@
     <div id="matchbar"></div>
     <div id="endscreen"></div>
     <div id="overlay">
-      <div>
-        <b>Click to play</b><br />
-        <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move &nbsp; <kbd>Mouse</kbd> look &nbsp; <kbd>Space</kbd> jump<br />
-        <kbd>Shift</kbd> sprint &nbsp; <kbd>C</kbd> slide (sprint first, then tap C) &nbsp; <kbd>R</kbd> respawn (offline)<br />
-        <kbd>Left click</kbd> shoot &nbsp; <kbd>Right click</kbd> aim &nbsp; <kbd>1</kbd>-<kbd>5</kbd> or <kbd>Wheel</kbd> change gun &nbsp; <kbd>Tab</kbd> scoreboard<br />
-        <kbd>Esc</kbd> release the mouse &nbsp; <kbd>M</kbd> mute
+      <div id="pause-menu">
+        <b>Paused</b><br />
+        <span class="hint">Click anywhere else to get back in the game</span>
         <div id="pause-actions">
           <button id="leave" class="ghost">Leave match</button>
-          <label>Volume <input type="range" id="volume2" min="0" max="100" /></label>
+          <button id="open-settings">Settings</button>
         </div>
+      </div>
+      <div id="settings-panel" style="display: none">
+        <b>Settings</b>
+        <div id="controls-list">
+          <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move &nbsp; <kbd>Mouse</kbd> look &nbsp; <kbd>Space</kbd> jump<br />
+          <kbd>Shift</kbd> sprint &nbsp; <kbd>C</kbd> slide (sprint first, then tap C) &nbsp; <kbd>R</kbd> respawn (offline)<br />
+          <kbd>Left click</kbd> shoot &nbsp; <kbd>Right click</kbd> aim &nbsp; <kbd>1</kbd>-<kbd>5</kbd> or <kbd>Wheel</kbd> change gun<br />
+          <kbd>Tab</kbd> scoreboard &nbsp; <kbd>M</kbd> mute &nbsp; <kbd>Esc</kbd> pause
+        </div>
+        <div id="settings">
+          <label>Volume <input type="range" id="volume2" min="0" max="100" /><span id="volume2-v"></span></label>
+          <label>Mouse sensitivity <input type="range" id="set-sens" min="20" max="300" /><span id="set-sens-v"></span></label>
+          <label>Field of view <input type="range" id="set-fov" min="60" max="110" /><span id="set-fov-v"></span></label>
+          <label><span></span><span><input type="checkbox" id="set-xhair" /> Crosshair</span></label>
+          <label><span></span><span><input type="checkbox" id="set-map" /> Mini-map</span></label>
+          <label><span></span><span><input type="checkbox" id="set-dbg" /> Debug readout</span></label>
+          <label><span></span><span><input type="checkbox" id="set-shadows" /> Shadows</span></label>
+        </div>
+        <div id="settings-back"><button id="close-settings" class="ghost">Back</button></div>
       </div>
     </div>
     <script type="module" src="/src/main.ts"></script>

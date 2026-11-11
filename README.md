@@ -4,9 +4,9 @@ Hitscan is a multiplayer 3D arena shooter that runs in the browser: TypeScript, 
 authoritative Node server with client-side prediction, interpolation and a built-in network simulator.
 See the roadmap doc for the full plan.
 
-**Status: Stage 6** - movement, slide, multiplayer with lag-compensated hits, five guns with aim down sights, a lobby,
-timed rounds, synthesized sound, deployment files (see `DEPLOY.md`), five maps with a validator, and soldier models for
-other players. Next: load test, CI and polish (Stage 7).
+**Status: Stage 7 (feature complete)** - movement and slide, multiplayer with an authoritative server, prediction and
+lag-compensated hits, five guns with iron sights, a lobby with timed rounds, five validated maps, soldier models,
+synthesized sound, a settings menu, a mini-map, a load test, CI, and deployment files (see `DEPLOY.md`).
 
 ## Setup (Windows PowerShell)
 
@@ -70,7 +70,7 @@ last server correction moved you.
 | Tab | Hold to show the scoreboard |
 | M | Mute / unmute (volume sliders are in the lobby and the pause screen) |
 | R | Respawn (offline only) |
-| Esc | Release the mouse (the pause screen has Leave match) |
+| Esc | Release the mouse. The pause screen has Leave match, volume, mouse sensitivity, field of view and toggles for the crosshair, mini-map and debug readout (saved in your browser) |
 
 The slide needs a fast run-up and then has a cooldown. The tunnel at the south end of the map
 is only slide-high: slide in, and you stay crouched until you are clear of the ceiling.
@@ -154,6 +154,10 @@ damage, fire rate, health, respawn time and the rewind limit are under `COMBAT`.
   loss at 100 ms) land nearly every shot, against about one in ten when the rewind is switched off.
 - **Server rules:** inputs are applied once and in order, a client sending three times too fast gains nothing,
   extreme or garbage input is clamped or ignored, full servers turn players away, idle players are dropped.
+- **Lobby and rounds:** nickname cleaning, create / join / quick play, score and time limits, end of round and the next
+  round, rate limits and per-address caps.
+- **Maps:** every map file passes the validator; the validator catches each kind of broken map; stairs can really be
+  walked with the movement code.
 
 ## Layout
 
@@ -167,11 +171,18 @@ damage, fire rate, health, respawn time and the rewind limit are under `COMBAT`.
 | `shared/src/interp.ts` | Interpolation of other players |
 | `shared/src/hitscan.ts` | Shot geometry: the aim direction, ray against walls and player boxes |
 | `shared/src/combat.ts` | The trigger rule shared by client and server |
-| `client/src/viewmodel.ts` | The gun in your hands (blocky models, sway, recoil, muzzle flash) |
+| `shared/src/lobby.ts` | The lobby messages (JSON text frames) and nickname cleaning |
+| `shared/src/mapcheck.ts` | The map validator |
+| `client/src/viewmodel.ts` | The gun in your hands (hands, iron sights, sway, recoil, muzzle flash) |
+| `client/src/guns.ts`, `humanoid.ts` | The gun models and the soldier model, built from boxes and cylinders |
+| `client/src/audio.ts` | Synthesized sound (Web Audio) |
+| `client/src/lobby.ts`, `settings.ts`, `minimap.ts` | The lobby screen, saved settings, the mini-map |
 | `shared/src/netsim.ts` | Network simulator (delay, jitter, loss) and the virtual clock used by tests |
-| `shared/maps/arena1.json` | The first map (boxes + spawn points) |
+| `shared/maps/*.json` | The five maps (boxes + spawn points) |
 | `server/src/game.ts` | The game server logic, with no networking in it |
-| `server/src/main.ts` | The WebSocket front door (the only file that uses `ws`) |
+| `server/src/hub.ts`, `match.ts`, `limits.ts` | Lobby and matches, rounds, rate limits |
+| `server/src/main.ts` | The WebSocket front door, `/health` and `/stats` |
+| `server/tools/loadtest.ts` | The load test bots |
 | `server/src/loop.ts` | The fixed-rate tick loop |
 | `client/src/` | Three.js renderer, input handling, networking, main loop |
 | `shared/test/`, `server/test/` | Tests |
@@ -197,6 +208,15 @@ JSON file in `shared/maps/` (copy an existing one), run `npm test`, and fix what
 `floor`, `wall`, `cover`, `platform` or `ceiling`, with `min` and `max` corners in metres. Steps up to 0.4 m are walked,
 a jump clears about 1.3 m, and small maps must fit in 34 m, medium in 56 m.
 
+## How the maps look
+
+Each map has its own theme (`client/src/world.ts`): brick, concrete, tiles, asphalt, corrugated shipping containers,
+wooden crates, metal plate and grating, all drawn in code as textures (`client/src/textures.ts`, no image files). Maps
+also get a sky with clouds and a sun, shadows, a skyline of distant buildings (or quarry walls in The Pit), signs, floor
+markings, hazard stripes on high decks, lamps, and a roof in the Warehouse. Only the boxes in the map file are solid: the
+rest is either flat on a surface or out of reach, so what looks solid is solid. Shadows can be switched off in Settings
+for a slower computer.
+
 ## Models
 
 Other players are drawn as soldiers (helmet, visor, vest, swinging legs, a slide pose) holding the gun they last
@@ -216,3 +236,28 @@ lobby idle timeouts are built in. `GET /health` is available for uptime checks. 
 All sound is synthesized in the browser with the Web Audio API (no audio files): per-gun shots, hit and kill
 ticks, footsteps, landing, slide, round start and end. Other players' sounds are positional. Browsers only
 allow sound after a click, so it starts when you click to play.
+
+## Load test and performance
+
+`npm run server` exposes `GET /stats` (players, matches, tick time, CPU, memory over the last 10 seconds) and prints the
+same every 10 seconds while anyone is connected. `npm run loadtest` connects bots over real WebSockets; each sends 60
+inputs a second, runs, jumps and fires:
+
+```powershell
+$env:MAX_MATCHES="40"; npm run server               # terminal 1 (the default is 8 matches)
+npm run loadtest -- --bots 200 --seconds 20         # terminal 2
+```
+
+Measured in a Linux container with 2 cores, the bots and the server sharing them (so the server had less than a core):
+
+| Bots | Matches | Tick time (avg / worst, budget 16.7 ms) | Server CPU | Snapshots per bot | Downstream |
+|---|---|---|---|---|---|
+| 64 | 10 | 1.5 ms / 6.2 ms | 17% of a core | 30.1 per second (all 30) | 4.2 Mbit/s |
+| 200 | 31 | 4.2 ms / 12.6 ms | 44% of a core | 29.7 per second | 12.6 Mbit/s |
+
+Every bot received the full 30 snapshots a second and none were dropped. Numbers on your machine and on a real network
+will differ; the real limit is more likely to be bandwidth (about 60 kbit/s per player) than the simulation.
+
+## Continuous integration
+
+`.github/workflows/ci.yml` runs on every push and pull request: typecheck, the full test suite, and a production build.

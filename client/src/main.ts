@@ -6,6 +6,9 @@ import {
 import type { Input, MatchInfo, MatchPhase, PlayerState, RemotePlayer, ShotEvent, Snapshot, Target, Vec3 } from '@hitscan/shared';
 import { GameAudio } from './audio.ts';
 import { Humanoid } from './humanoid.ts';
+import { MiniMap } from './minimap.ts';
+import type { Ping } from './minimap.ts';
+import { Settings } from './settings.ts';
 import { InputState } from './input.ts';
 import { LobbyUI, MatchHud } from './lobby.ts';
 import { NetClient, parseNetOptions } from './net.ts';
@@ -13,7 +16,7 @@ import { ViewModel } from './viewmodel.ts';
 import { buildWorld, disposeWorld } from './world.ts';
 import type { World } from './world.ts';
 
-const BASE_FOV = 75;
+const settings = new Settings(); // saved in the browser; edited on the pause screen
 const SLIDE_FOV_KICK = 10;
 
 // Every map the server can run is bundled, so joining a match just switches to the one it names.
@@ -32,11 +35,17 @@ const options = parseNetOptions(
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.autoClear = false; // each frame clears once by hand, then draws the world and the gun on top
 document.body.prepend(renderer.domElement);
 
 const scene = new THREE.Scene();
 let world: World = buildWorld(scene, map);
+world.sun.castShadow = settings.values.shadows;
+const minimapEl = document.getElementById('minimap') as HTMLCanvasElement;
+const minimap = new MiniMap(minimapEl, map);
+const pings: Ping[] = []; // where other players recently fired from, shown on the mini-map
 
 /** Switch the scene to another map (its walls, lights and sky). Nothing in the old one is kept. */
 function setMap(next: typeof map): void {
@@ -48,14 +57,16 @@ function setMap(next: typeof map): void {
   map = next;
   boxes = map.boxes;
   world = buildWorld(scene, map);
+  world.sun.castShadow = settings.values.shadows;
+  minimap.setMap(map);
   scene.background = new THREE.Color(world.sky);
-  scene.fog = new THREE.Fog(world.sky, 30, 90);
+  scene.fog = new THREE.Fog(world.fog.color, world.fog.near, world.fog.far);
   spawnIndex = 0;
 }
 scene.background = new THREE.Color(world.sky);
-scene.fog = new THREE.Fog(world.sky, 30, 90);
+scene.fog = new THREE.Fog(world.fog.color, world.fog.near, world.fog.far);
 
-const camera = new THREE.PerspectiveCamera(BASE_FOV, window.innerWidth / window.innerHeight, 0.05, 200);
+const camera = new THREE.PerspectiveCamera(settings.values.fov, window.innerWidth / window.innerHeight, 0.05, 200);
 camera.rotation.order = 'YXZ';
 const viewmodel = new ViewModel();
 viewmodel.resize(camera.aspect);
@@ -72,6 +83,12 @@ window.addEventListener('resize', () => {
 const input = new InputState(renderer.domElement);
 const overlay = document.getElementById('overlay') as HTMLElement;
 const hud = document.getElementById('hud') as HTMLElement;
+settings.bind(() => {
+  hud.style.display = settings.values.debug ? '' : 'none';
+  camera.fov = settings.values.fov;
+  camera.updateProjectionMatrix();
+  world.sun.castShadow = settings.values.shadows;
+});
 
 const audio = new GameAudio();
 
@@ -93,9 +110,26 @@ overlay.addEventListener('click', lockPointer);
 const leaveButton = document.getElementById('leave') as HTMLButtonElement;
 const pauseVolume = document.getElementById('volume2') as HTMLInputElement;
 pauseVolume.value = String(Math.round(audio.volume * 100));
-pauseVolume.addEventListener('input', () => audio.setVolume(Number(pauseVolume.value) / 100));
-for (const control of [leaveButton, pauseVolume]) control.addEventListener('click', (e) => e.stopPropagation());
-document.addEventListener('pointerlockchange', () => updateScreens());
+const volumeLabel = document.getElementById('volume2-v') as HTMLElement;
+volumeLabel.textContent = `${pauseVolume.value}%`;
+pauseVolume.addEventListener('input', () => {
+  audio.setVolume(Number(pauseVolume.value) / 100);
+  volumeLabel.textContent = `${pauseVolume.value}%`;
+});
+// The pause screen has two views: the two buttons, and the settings. Clicking the dim background gets you back in the game.
+const pauseMenu = document.getElementById('pause-menu') as HTMLElement;
+const settingsPanel = document.getElementById('settings-panel') as HTMLElement;
+function showSettings(open: boolean): void {
+  pauseMenu.style.display = open ? 'none' : '';
+  settingsPanel.style.display = open ? '' : 'none';
+}
+document.getElementById('open-settings')?.addEventListener('click', () => showSettings(true));
+document.getElementById('close-settings')?.addEventListener('click', () => showSettings(false));
+for (const part of [pauseMenu, settingsPanel]) part.addEventListener('click', (e) => e.stopPropagation());
+document.addEventListener('pointerlockchange', () => {
+  if (document.pointerLockElement) showSettings(false); // next time it opens, start on the two buttons
+  updateScreens();
+});
 window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyM' && !(e.target instanceof HTMLInputElement)) audio.toggleMute();
 });
@@ -226,6 +260,7 @@ function onEvents(events: ShotEvent[]): void {
     if (e.shooter !== myId) {
       spawnTracer(e.origin, e.end, 0xffc27a);
       remoteWeapon.set(e.shooter, e.weapon);
+      if (!heard.has(e.shooter)) pings.push({ x: e.origin[0], z: e.origin[2], born: now });
       remotes.get(e.shooter)?.model.fire();
       if (!heard.has(e.shooter)) {
         heard.add(e.shooter);
@@ -262,6 +297,7 @@ const lobbyUI = new LobbyUI(
     onVolume: (v) => {
       audio.setVolume(v);
       pauseVolume.value = String(Math.round(v * 100));
+      volumeLabel.textContent = `${pauseVolume.value}%`;
     },
   },
   audio.volume,
@@ -306,6 +342,7 @@ function resetGameState(): void {
   scoreRows = [];
   lastRemotes = [];
   feed.length = 0;
+  pings.length = 0;
   health = 100;
   alive = true;
   wasAlive = true;
@@ -534,7 +571,7 @@ function updateRemotes(players: RemotePlayer[], dt: number): void {
 // ---- main loop: fixed-timestep simulation, interpolated rendering
 let last = performance.now();
 let eye = eyeHeight(cur);
-let fov = BASE_FOV;
+let fov = settings.values.fov;
 let hudTimer = 0;
 let fps = 0;
 // Diagnostics: the worst frame time and biggest mouse step seen in the last full second.
@@ -610,6 +647,7 @@ function frame(now: number): void {
 
   eye += (eyeHeight(drawCur) - eye) * (1 - Math.exp(-frameDt * 18));
   camera.position.set(x, y + eye, z);
+  world.follow(camera.position);
   camera.rotation.set(input.pitch, input.yaw, 0);
 
   // Sound: listener follows the camera; footsteps, landing, sliding and weapon switches for us and others.
@@ -648,18 +686,25 @@ function frame(now: number): void {
   const wantAim = input.aimHeld && (mode === 'offline' || (mode === 'online' && alive));
   adsAmount += ((wantAim ? 1 : 0) - adsAmount) * (1 - Math.exp(-frameDt * 16));
   if (Math.abs((wantAim ? 1 : 0) - adsAmount) < 0.002) adsAmount = wantAim ? 1 : 0;
-  const targetFov = (BASE_FOV + (drawCur.sliding ? SLIDE_FOV_KICK : 0)) * (1 - adsAmount) + weaponNow.adsFov * adsAmount;
+  const targetFov = (settings.values.fov + (drawCur.sliding ? SLIDE_FOV_KICK : 0)) * (1 - adsAmount) + weaponNow.adsFov * adsAmount;
   fov += (targetFov - fov) * (1 - Math.exp(-frameDt * 18));
   camera.fov = fov;
   camera.updateProjectionMatrix();
-  input.sensitivityScale = Math.tan((fov * Math.PI) / 360) / Math.tan((BASE_FOV * Math.PI) / 360);
+  input.sensitivityScale = (Math.tan((fov * Math.PI) / 360) / Math.tan((settings.values.fov * Math.PI) / 360)) * settings.values.sensitivity;
+
+  const showMap = settings.values.minimap && (mode === 'online' || mode === 'offline');
+  if (minimapEl.style.display !== (showMap ? 'block' : 'none')) minimapEl.style.display = showMap ? 'block' : 'none';
+  if (showMap) {
+    while (pings.length > 0 && now - pings[0].born > 1500) pings.shift();
+    minimap.draw({ x, z, yaw: input.yaw }, pings, now);
+  }
 
   viewmodel.setWeapon(input.weapon);
   const showGun = mode === 'offline' || (mode === 'online' && alive);
   viewmodel.update(frameDt, adsAmount, Math.hypot(drawCur.vx, drawCur.vz), drawCur.grounded, showGun);
   const scoped = weaponNow.scope && adsAmount > 0.9;
   scopeEl.style.display = scoped ? 'block' : 'none';
-  crosshairEl.style.display = scoped ? 'none' : 'block';
+  crosshairEl.style.display = scoped || !settings.values.crosshair ? 'none' : 'block';
   crosshairEl.style.opacity = String(Math.max(0, 1 - adsAmount * 1.3)); // the sights are the crosshair when aiming
   vignetteEl.style.opacity = String(scoped ? 0 : adsAmount * 0.9);
 

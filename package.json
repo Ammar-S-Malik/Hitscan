@@ -15,7 +15,8 @@
     "server": "node --experimental-strip-types --disable-warning=ExperimentalWarning server/src/main.ts",
     "build": "vite build client",
     "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test \"shared/test/*.test.ts\" \"server/test/*.test.ts\"",
-    "typecheck": "tsc -p shared && tsc -p client && tsc -p server"
+    "typecheck": "tsc -p shared && tsc -p client && tsc -p server",
+    "loadtest": "node --experimental-strip-types --disable-warning=ExperimentalWarning server/tools/loadtest.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

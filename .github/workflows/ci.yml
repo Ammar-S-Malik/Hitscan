@@ -1,0 +1,22 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Typecheck shared, client and server
+        run: npm run typecheck
+      - name: Tests (game rules, netcode, lobby, maps)
+        run: npm test
+      - name: Build the game page
+        run: npm run build

@@ -85,6 +85,9 @@ export class Humanoid {
       this.upper.add(g.group);
       this.guns.push(g);
     }
+    this.root.traverse((o) => {
+      if ((o as THREE.Mesh).isMesh) o.castShadow = true;
+    });
     this.root.scale.setScalar(0.96); // the helmet would otherwise poke above the 1.8 m hit box
     this.poseArms();
   }

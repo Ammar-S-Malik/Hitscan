@@ -49,6 +49,9 @@ function clientIp(req: IncomingMessage): string {
 const http = createServer((req, res) => {
   if (req.url === '/health') {
     res.writeHead(200, { 'content-type': 'text/plain' }).end('ok');
+  } else if (req.url === '/stats') {
+    // Load numbers for the last ~10 seconds. The load test tool reads this.
+    res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(currentStats()));
   } else {
     res.writeHead(404, { 'content-type': 'text/plain' }).end('Hitscan game server. Connect with the game page.');
   }
@@ -107,17 +110,44 @@ http.listen(PORT, () => {
   if (ALLOWED_ORIGINS.length > 0) console.log(`only accepting connections from: ${ALLOWED_ORIGINS.join(', ')}`);
 });
 
-// Every 10 seconds, report load. A tick has 16.7 ms to finish.
+// Load numbers. Once a second the tick loop's counters are moved into a window of the last 10 seconds.
+// A tick has 16.7 ms to finish.
+const window: Array<{ ticks: number; totalMs: number; worstMs: number; cpuMs: number }> = [];
+let lastCpu = process.cpuUsage();
 setInterval(() => {
   const s = loop.stats;
-  if (s.ticks > 0 && (hub.clientCount > 0 || hub.matchCount > 0)) {
-    console.log(
-      `${hub.clientCount} connected, ${hub.playerCount} playing in ${hub.matchCount} matches | tick avg ${(s.totalMs / s.ticks).toFixed(3)} ms, worst ${s.worstMs.toFixed(2)} ms`,
-    );
-  }
+  const cpu = process.cpuUsage(lastCpu);
+  lastCpu = process.cpuUsage();
+  window.push({ ticks: s.ticks, totalMs: s.totalMs, worstMs: s.worstMs, cpuMs: (cpu.user + cpu.system) / 1000 });
+  if (window.length > 10) window.shift();
   s.ticks = 0;
   s.totalMs = 0;
   s.worstMs = 0;
+}, 1000).unref();
+
+function currentStats() {
+  const ticks = window.reduce((a, w) => a + w.ticks, 0);
+  const totalMs = window.reduce((a, w) => a + w.totalMs, 0);
+  const cpuMs = window.reduce((a, w) => a + w.cpuMs, 0);
+  return {
+    connected: hub.clientCount,
+    players: hub.playerCount,
+    matches: hub.matchCount,
+    seconds: window.length,
+    ticksPerSecond: window.length > 0 ? ticks / window.length : 0,
+    tickAvgMs: ticks > 0 ? totalMs / ticks : 0,
+    tickWorstMs: Math.max(0, ...window.map((w) => w.worstMs)),
+    cpuPercent: window.length > 0 ? (cpuMs / (window.length * 1000)) * 100 : 0, // of one core
+    memoryMb: process.memoryUsage().rss / 1048576,
+  };
+}
+
+setInterval(() => {
+  if (hub.clientCount === 0 && hub.matchCount === 0) return;
+  const s = currentStats();
+  console.log(
+    `${s.connected} connected, ${s.players} playing in ${s.matches} matches | tick avg ${s.tickAvgMs.toFixed(3)} ms, worst ${s.tickWorstMs.toFixed(2)} ms | cpu ${s.cpuPercent.toFixed(0)}% of one core, ${s.memoryMb.toFixed(0)} MB`,
+  );
 }, 10_000).unref();
 
 function shutdown(): void {
