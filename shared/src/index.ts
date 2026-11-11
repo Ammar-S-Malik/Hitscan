@@ -2,3 +2,7 @@ export * from './config.ts';
 export * from './types.ts';
 export * from './map.ts';
 export * from './movement.ts';
+export * from './protocol.ts';
+export * from './netsim.ts';
+export * from './predictor.ts';
+export * from './interp.ts';

@@ -4,16 +4,18 @@
   "type": "module",
   "workspaces": [
     "shared",
-    "client"
+    "client",
+    "server"
   ],
   "engines": {
     "node": ">=22.18"
   },
   "scripts": {
     "dev": "vite client",
+    "server": "node --experimental-strip-types --disable-warning=ExperimentalWarning server/src/main.ts",
     "build": "vite build client",
-    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test \"shared/test/*.test.ts\"",
-    "typecheck": "tsc -p shared && tsc -p client"
+    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test \"shared/test/*.test.ts\" \"server/test/*.test.ts\"",
+    "typecheck": "tsc -p shared && tsc -p client && tsc -p server"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
