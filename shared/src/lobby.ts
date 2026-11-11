@@ -41,7 +41,7 @@ export interface ScoreRow {
 export type ClientMsg =
   | { t: 'hello'; name: string }
   | { t: 'list' }
-  | { t: 'create'; name: string; scoreLimit: number; timeLimit: number }
+  | { t: 'create'; name: string; scoreLimit: number; timeLimit: number; map: string } // map '' = pick one at random
   | { t: 'join'; id: number }
   | { t: 'quick' }
   | { t: 'leave' };
@@ -101,6 +101,7 @@ export function parseClientMessage(text: string): ClientMsg | null {
         name: sanitizeName(raw.name, '', LOBBY.matchNameMax),
         scoreLimit: pickFrom(LOBBY.scoreLimits, raw.scoreLimit, LOBBY.defaultScoreLimit),
         timeLimit: pickFrom(LOBBY.timeLimits, raw.timeLimit, LOBBY.defaultTimeLimit),
+        map: typeof raw.map === 'string' ? raw.map.slice(0, 40) : '',
       };
     case 'join':
       return typeof raw.id === 'number' && Number.isInteger(raw.id) && raw.id > 0 ? { t: 'join', id: raw.id } : null;

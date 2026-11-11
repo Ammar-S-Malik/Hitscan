@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { LOBBY, TICK_RATE } from '@hitscan/shared';
-import { Link, Player, newHub, run } from './hubkit.ts';
+import { Hub } from '../src/hub.ts';
+import { Link, Player, flat, newHub, run } from './hubkit.ts';
 
 test('hello: the name is cleaned and acknowledged, and the match list comes back', () => {
   const hub = newHub();
@@ -189,4 +190,18 @@ test('too many connections from one address are refused', () => {
   assert.equal(hub.connect(refused, 'same'), null);
   assert.ok(refused.closed !== null);
   assert.ok(hub.connect(new Link(), 'other') !== null);
+});
+
+test('create can pick a map by name; a missing or unknown name gets a random real map, favouring one not already in use', () => {
+  const a = flat();
+  const b = { ...flat(), name: 'Other' };
+  const hub = new Hub({ maps: [a, b] });
+  const ann = new Player(hub, 'Ann');
+  ann.say({ t: 'create', name: '', scoreLimit: 10, timeLimit: 180, map: 'Other' });
+  assert.equal(ann.link.last('joined')!.match.map, 'Other');
+  const bo = new Player(hub, 'Bo', '2.2.2.2');
+  bo.say({ t: 'create', name: '', scoreLimit: 10, timeLimit: 180, map: 'No Such Map' });
+  assert.equal(bo.link.last('joined')!.match.map, 'Flat', 'the map not in use yet is chosen');
+  ann.say({ t: 'list' });
+  assert.deepStrictEqual(new Set(ann.link.last('matches')!.list.map((m) => m.map)), new Set(['Flat', 'Other']));
 });

@@ -30,6 +30,8 @@
                 pointer-events: none; white-space: pre; }
       #dead { position: fixed; left: 50%; top: 38%; transform: translateX(-50%); display: none; text-align: center; color: #fff;
               font-size: 22px; text-shadow: 0 2px 6px #000; pointer-events: none; }
+      #vignette { position: fixed; inset: 0; pointer-events: none; opacity: 0;
+        background: radial-gradient(ellipse at center, rgba(0,0,0,0) 45%, rgba(0,0,0,0.55) 100%); }
       #scope { position: fixed; inset: 0; display: none; pointer-events: none;
                background: radial-gradient(circle at center, rgba(0,0,0,0) 0, rgba(0,0,0,0) 36vh, #000 36.4vh); }
       #scope::before, #scope::after { content: ''; position: absolute; background: rgba(0,0,0,.85); }
@@ -79,6 +81,7 @@
   </head>
   <body>
     <div id="hud"></div>
+    <div id="vignette"></div>
     <div id="scope"></div>
     <div id="crosshair"></div>
     <div id="weapons"></div>
@@ -101,6 +104,7 @@
         <h2>Create a match</h2>
         <div class="row">
           <input type="text" id="mname" maxlength="24" placeholder="Match name (optional)" autocomplete="off" />
+          <label>Map <select id="mmap"></select></label>
           <label>First to <select id="mscore"></select> kills</label>
           <label>Round <select id="mtime"></select></label>
           <button id="create">Create</button>

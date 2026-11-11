@@ -4,19 +4,24 @@ import {
   eyeHeight, parseMap, parseServerMessage, pelletDirections, shotSeed, step, traceShot, weaponOf,
 } from '@hitscan/shared';
 import type { Input, MatchInfo, MatchPhase, PlayerState, RemotePlayer, ShotEvent, Snapshot, Target, Vec3 } from '@hitscan/shared';
-import arena from '../../shared/maps/arena1.json';
 import { GameAudio } from './audio.ts';
+import { Humanoid } from './humanoid.ts';
 import { InputState } from './input.ts';
 import { LobbyUI, MatchHud } from './lobby.ts';
 import { NetClient, parseNetOptions } from './net.ts';
 import { ViewModel } from './viewmodel.ts';
-import { buildWorld } from './world.ts';
+import { buildWorld, disposeWorld } from './world.ts';
+import type { World } from './world.ts';
 
 const BASE_FOV = 75;
 const SLIDE_FOV_KICK = 10;
 
-const map = parseMap(arena);
-const boxes = map.boxes;
+// Every map the server can run is bundled, so joining a match just switches to the one it names.
+const allMaps = Object.values(import.meta.glob('../../shared/maps/*.json', { eager: true, import: 'default' }))
+  .map((raw) => parseMap(raw))
+  .sort((a, b) => a.name.localeCompare(b.name));
+let map = allMaps.find((m) => m.name === 'Courtyard') ?? allMaps[0];
+let boxes = map.boxes;
 const options = parseNetOptions(
   window.location.search,
   window.location.hostname,
@@ -31,9 +36,24 @@ renderer.autoClear = false; // each frame clears once by hand, then draws the wo
 document.body.prepend(renderer.domElement);
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x9fb4c8);
-scene.fog = new THREE.Fog(0x9fb4c8, 30, 90);
-buildWorld(scene, map);
+let world: World = buildWorld(scene, map);
+
+/** Switch the scene to another map (its walls, lights and sky). Nothing in the old one is kept. */
+function setMap(next: typeof map): void {
+  if (next === map && world) {
+    scene.background = new THREE.Color(world.sky);
+    return;
+  }
+  disposeWorld(scene, world);
+  map = next;
+  boxes = map.boxes;
+  world = buildWorld(scene, map);
+  scene.background = new THREE.Color(world.sky);
+  scene.fog = new THREE.Fog(world.sky, 30, 90);
+  spawnIndex = 0;
+}
+scene.background = new THREE.Color(world.sky);
+scene.fog = new THREE.Fog(world.sky, 30, 90);
 
 const camera = new THREE.PerspectiveCamera(BASE_FOV, window.innerWidth / window.innerHeight, 0.05, 200);
 camera.rotation.order = 'YXZ';
@@ -128,6 +148,7 @@ const scoresEl = el('scores');
 const deadEl = el('dead');
 const scopeEl = el('scope');
 const crosshairEl = el('crosshair');
+const vignetteEl = el('vignette');
 const weaponsEl = el('weapons');
 let shownWeapon = -1;
 let offlineTicks = 0;
@@ -204,6 +225,8 @@ function onEvents(events: ShotEvent[]): void {
   for (const e of events) {
     if (e.shooter !== myId) {
       spawnTracer(e.origin, e.end, 0xffc27a);
+      remoteWeapon.set(e.shooter, e.weapon);
+      remotes.get(e.shooter)?.model.fire();
       if (!heard.has(e.shooter)) {
         heard.add(e.shooter);
         audio.shot(e.weapon, e.origin);
@@ -232,9 +255,9 @@ function onEvents(events: ShotEvent[]): void {
 const lobbyUI = new LobbyUI(
   {
     onQuick: () => net?.sendText({ t: 'quick' }),
-    onCreate: (matchName, scoreLimit, timeLimit) => net?.sendText({ t: 'create', name: matchName, scoreLimit, timeLimit }),
+    onCreate: (matchName, scoreLimit, timeLimit, mapName) => net?.sendText({ t: 'create', name: matchName, scoreLimit, timeLimit, map: mapName }),
     onJoin: (id) => net?.sendText({ t: 'join', id }),
-    onOffline: () => goOffline('practising alone (no server)'),
+    onOffline: (mapName) => goOffline('practising alone (no server)', mapName),
     onNameChange: (n) => net?.sendText({ t: 'hello', name: n }),
     onVolume: (v) => {
       audio.setVolume(v);
@@ -242,6 +265,7 @@ const lobbyUI = new LobbyUI(
     },
   },
   audio.volume,
+  allMaps.map((m) => ({ name: m.name, size: m.size, players: m.maxPlayers })),
 );
 lobbyUI.onJoin((id) => net?.sendText({ t: 'join', id }));
 const matchHud = new MatchHud();
@@ -268,11 +292,9 @@ function resetGameState(): void {
   sentAt.clear();
   roundTripMs = 0;
   fireControl.reset();
-  for (const [, m] of remoteMeshes) {
-    scene.remove(m);
-    disposeMesh(m);
-  }
-  remoteMeshes.clear();
+  for (const v of remotes.values()) removeRemote(v);
+  remotes.clear();
+  remoteWeapon.clear();
   for (const t of tracers) {
     scene.remove(t.line);
     t.line.geometry.dispose();
@@ -302,8 +324,9 @@ function backToLobby(message: string, isError = false): void {
   if (netOpen) net?.sendText({ t: 'list' });
 }
 
-function goOffline(reason: string): void {
+function goOffline(reason: string, mapName = ''): void {
   resetGameState();
+  setMap(allMaps.find((m) => m.name === mapName) ?? allMaps[Math.floor(Math.random() * allMaps.length)]);
   note = reason;
   prev = cur = spawn();
   acc = 0;
@@ -356,6 +379,11 @@ function onLobbyText(text: string): void {
       break;
     case 'joined':
       resetGameState();
+      {
+        const next = allMaps.find((m) => m.name === msg.match.map);
+        if (next) setMap(next);
+        else note = `this build has no map called "${msg.match.map}"`;
+      }
       matchPhase = msg.match.phase;
       matchHud.setClock(msg.match.phase, msg.match.left, msg.match.scoreLimit);
       note = `joined "${msg.match.name}", waiting for the world`;
@@ -453,50 +481,53 @@ setInterval(() => {
 }, 2000);
 updateScreens();
 
-// ---- other players: one box each, facing the way they face
-const remoteMeshes = new Map<number, THREE.Mesh>();
+// ---- other players: a soldier model each, facing the way they face
+interface RemoteView {
+  model: Humanoid;
+  x: number;
+  y: number;
+  z: number;
+  speed: number; // smoothed horizontal speed, which drives the walk animation
+}
+const remotes = new Map<number, RemoteView>();
+const remoteWeapon = new Map<number, number>(); // the gun each player last fired (the snapshot doesn't carry it)
 
-function disposeMesh(m: THREE.Mesh): void {
-  m.traverse((o) => {
-    const mesh = o as THREE.Mesh;
-    if (mesh.geometry) mesh.geometry.dispose();
-    const mat = mesh.material;
-    if (Array.isArray(mat)) mat.forEach((x) => x.dispose());
-    else if (mat) mat.dispose();
-  });
+function removeRemote(v: RemoteView): void {
+  scene.remove(v.model.root);
+  v.model.dispose();
 }
 
-function createRemote(id: number): THREE.Mesh {
-  const geometry = new THREE.BoxGeometry(BODY.radius * 2, BODY.standHeight, BODY.radius * 2);
-  geometry.translate(0, BODY.standHeight / 2, 0); // origin at the feet, like the simulation
-  const color = new THREE.Color().setHSL((id * 0.618) % 1, 0.6, 0.55);
-  const body = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color, roughness: 0.8 }));
-  const nose = new THREE.Mesh(
-    new THREE.BoxGeometry(0.18, 0.18, 0.3),
-    new THREE.MeshStandardMaterial({ color: 0x1b1f24, roughness: 0.8 }),
-  );
-  nose.position.set(0, 1.5, -BODY.radius - 0.1); // yaw 0 faces -Z
-  body.add(nose);
-  scene.add(body);
-  remoteMeshes.set(id, body);
-  return body;
+function createRemote(id: number, r: RemotePlayer): RemoteView {
+  const model = new Humanoid((id * 0.618) % 1);
+  scene.add(model.root);
+  const view: RemoteView = { model, x: r.x, y: r.y, z: r.z, speed: 0 };
+  remotes.set(id, view);
+  return view;
 }
 
-function updateRemotes(players: RemotePlayer[]): void {
+function updateRemotes(players: RemotePlayer[], dt: number): void {
   const seen = new Set<number>();
   for (const r of players) {
     seen.add(r.id);
-    const m = remoteMeshes.get(r.id) ?? createRemote(r.id);
-    m.visible = r.alive; // a dead player's body disappears
-    m.position.set(r.x, r.y, r.z);
-    m.rotation.y = r.yaw;
-    m.scale.y = r.sliding ? BODY.slideHeight / BODY.standHeight : 1;
+    const v = remotes.get(r.id) ?? createRemote(r.id, r);
+    const step = Math.max(dt, 1e-3);
+    const raw = Math.hypot(r.x - v.x, r.z - v.z) / step;
+    const grounded = Math.abs(r.y - v.y) / step < 1.5;
+    v.speed += (Math.min(raw, 14) - v.speed) * (1 - Math.exp(-dt * 10));
+    v.x = r.x;
+    v.y = r.y;
+    v.z = r.z;
+    v.model.root.visible = r.alive; // a dead player's body disappears
+    v.model.root.position.set(r.x, r.y, r.z);
+    v.model.root.rotation.y = r.yaw;
+    v.model.setWeapon(remoteWeapon.get(r.id) ?? 0);
+    v.model.update(dt, v.speed, r.sliding, grounded);
   }
-  for (const [id, m] of remoteMeshes) {
+  for (const [id, v] of remotes) {
     if (seen.has(id)) continue;
-    scene.remove(m);
-    disposeMesh(m);
-    remoteMeshes.delete(id);
+    removeRemote(v);
+    remotes.delete(id);
+    remoteWeapon.delete(id);
   }
 }
 
@@ -562,7 +593,7 @@ function frame(now: number): void {
     }
     predictor.smoothErrors(frameDt);
     lastRemotes = interp.sample(performance.now()).players;
-    updateRemotes(lastRemotes);
+    updateRemotes(lastRemotes, frameDt);
   }
 
   // Which state to draw: the predictor's once online, otherwise the local one.
@@ -629,7 +660,8 @@ function frame(now: number): void {
   const scoped = weaponNow.scope && adsAmount > 0.9;
   scopeEl.style.display = scoped ? 'block' : 'none';
   crosshairEl.style.display = scoped ? 'none' : 'block';
-  crosshairEl.style.opacity = String(1 - adsAmount * 0.6);
+  crosshairEl.style.opacity = String(Math.max(0, 1 - adsAmount * 1.3)); // the sights are the crosshair when aiming
+  vignetteEl.style.opacity = String(scoped ? 0 : adsAmount * 0.9);
 
   if (shownWeapon !== input.weapon) {
     shownWeapon = input.weapon;
@@ -668,7 +700,7 @@ function frame(now: number): void {
         ? `   [simulated: +${options.lagMs} ms, ${options.jitterMs} ms jitter, ${options.lossPct}% loss each way]`
         : '';
       netText =
-        `net    online   ${roundTripMs.toFixed(0)} ms round trip   ${shownSnapshots}/s snapshots   others ${remoteMeshes.size}${sim}\n` +
+        `net    online   ${roundTripMs.toFixed(0)} ms round trip   ${shownSnapshots}/s snapshots   others ${remotes.size}${sim}\n` +
         `sync   ${predictor.pendingCount} unacknowledged inputs   last correction ${(predictor.lastCorrection * 100).toFixed(1)} cm\n`;
     } else {
       netText = `net    ${note}\n`;

@@ -4,9 +4,9 @@ Hitscan is a multiplayer 3D arena shooter that runs in the browser: TypeScript, 
 authoritative Node server with client-side prediction, interpolation and a built-in network simulator.
 See the roadmap doc for the full plan.
 
-**Status: Stage 5** - movement, slide, the first map, multiplayer, five guns with aim down sights, lag-compensated
-hits, a lobby (nickname, open matches, create, join, quick play), timed rounds with a scoreboard and automatic
-next round, synthesized sound, abuse limits, and deployment files (see `DEPLOY.md`). Next: more maps (Stage 6).
+**Status: Stage 6** - movement, slide, multiplayer with lag-compensated hits, five guns with aim down sights, a lobby,
+timed rounds, synthesized sound, deployment files (see `DEPLOY.md`), five maps with a validator, and soldier models for
+other players. Next: load test, CI and polish (Stage 7).
 
 ## Setup (Windows PowerShell)
 
@@ -175,6 +175,34 @@ damage, fire rate, health, respawn time and the rewind limit are under `COMBAT`.
 | `server/src/loop.ts` | The fixed-rate tick loop |
 | `client/src/` | Three.js renderer, input handling, networking, main loop |
 | `shared/test/`, `server/test/` | Tests |
+
+## Maps
+
+Five maps live in `shared/maps/*.json`; the lobby's Create row lets you pick one (or a random one), and Quick play
+starts a random map that is not already in use.
+
+| Map | Size | Players | Character |
+|---|---|---|---|
+| Courtyard | medium | 8 | open arena, central platform, a slide-only tunnel |
+| Skybridge | medium | 8 | two decks joined by a bridge, stairs up, cover below |
+| The Pit | small | 6 | sunken centre with stairs down and a jumpable rim |
+| Container Yard | small | 6 | rows of containers, narrow alleys |
+| Warehouse | small | 6 | rooms with doorways, a slide tunnel and a mezzanine |
+
+`shared/src/mapcheck.ts` is the map validator, and `npm test` runs it on every map file. It rejects a map where
+a spawn is inside a wall or in the air, spawns are too close together, there are fewer spawns than players, anything
+sticks out of the bounds, the floor has a hole, a platform cannot be climbed onto, a player can be trapped in a pit,
+or a spawn cannot reach the others. It also warns when two nearby spawns can see each other. To add a map, drop a new
+JSON file in `shared/maps/` (copy an existing one), run `npm test`, and fix whatever the validator reports. Boxes are
+`floor`, `wall`, `cover`, `platform` or `ceiling`, with `min` and `max` corners in metres. Steps up to 0.4 m are walked,
+a jump clears about 1.3 m, and small maps must fit in 34 m, medium in 56 m.
+
+## Models
+
+Other players are drawn as soldiers (helmet, visor, vest, swinging legs, a slide pose) holding the gun they last
+fired, with a muzzle flash when they shoot. Your own gun has hands and sleeves. Everything is built from boxes and
+cylinders in code (`client/src/humanoid.ts`, `client/src/guns.ts`), so there are no art files. The shape stays inside
+the same hit box the server uses.
 
 ## Server settings and limits
 

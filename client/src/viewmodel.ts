@@ -1,84 +1,34 @@
 import * as THREE from 'three';
 import { WEAPONS } from '@hitscan/shared';
+import { GUNS, buildGun } from './guns.ts';
 
 /**
  * The gun you hold, drawn in its own small scene on top of the world so it never sinks into walls.
- * The guns are simple blocks: no art files are needed, and they are easy to restyle later.
+ * The gun models live in guns.ts; the hands are drawn here.
  */
 
-interface GunSpec {
-  parts: Array<{ size: [number, number, number]; pos: [number, number, number]; color: number; rotX?: number }>;
-  muzzle: [number, number, number];
-  hip: [number, number, number]; // where the gun sits at the hip
-  adsY: number; // height of the gun when aiming, so the sights line up with the crosshair
-  adsZ: number;
+const GLOVE = 0x2a2e34;
+const SLEEVE = 0x3f5a4a;
+
+/** A hand in a glove, with a sleeve running back toward the camera. */
+function buildHand(at: [number, number, number], sideways: number): THREE.Group {
+  const g = new THREE.Group();
+  const glove = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.07, 0.1), new THREE.MeshStandardMaterial({ color: GLOVE, roughness: 0.9 }));
+  glove.position.set(...at);
+  g.add(glove);
+  const dir = new THREE.Vector3(sideways, -0.45, 1).normalize();
+  const sleeve = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.075, 0.5), new THREE.MeshStandardMaterial({ color: SLEEVE, roughness: 0.9 }));
+  sleeve.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir);
+  sleeve.position.set(at[0], at[1], at[2]).addScaledVector(dir, 0.3);
+  g.add(sleeve);
+  return g;
 }
-
-const DARK = 0x23272d;
-const MID = 0x3a414b;
-const WOOD = 0x6b4a2f;
-const LIGHT = 0x59616d;
-
-const GUNS: GunSpec[] = [
-  { // Pistol
-    parts: [
-      { size: [0.05, 0.06, 0.24], pos: [0, 0, -0.12], color: MID },
-      { size: [0.045, 0.12, 0.06], pos: [0, -0.085, -0.02], color: DARK, rotX: 0.2 },
-      { size: [0.012, 0.014, 0.014], pos: [0, 0.037, -0.22], color: LIGHT },
-    ],
-    muzzle: [0, 0.005, -0.25], hip: [0.2, -0.2, -0.38], adsY: -0.095, adsZ: -0.3,
-  },
-  { // SMG
-    parts: [
-      { size: [0.06, 0.09, 0.34], pos: [0, 0, -0.15], color: DARK },
-      { size: [0.04, 0.15, 0.05], pos: [0, -0.115, -0.12], color: MID, rotX: 0.1 },
-      { size: [0.045, 0.1, 0.06], pos: [0, -0.085, 0.0], color: MID, rotX: 0.2 },
-      { size: [0.03, 0.03, 0.14], pos: [0, 0.01, -0.39], color: LIGHT },
-      { size: [0.05, 0.07, 0.2], pos: [0, -0.01, 0.15], color: MID },
-      { size: [0.015, 0.025, 0.015], pos: [0, 0.057, -0.3], color: LIGHT },
-    ],
-    muzzle: [0, 0.01, -0.47], hip: [0.2, -0.2, -0.4], adsY: -0.11, adsZ: -0.28,
-  },
-  { // Shotgun
-    parts: [
-      { size: [0.045, 0.045, 0.62], pos: [0, 0.025, -0.3], color: LIGHT },
-      { size: [0.04, 0.04, 0.5], pos: [0, -0.02, -0.25], color: DARK },
-      { size: [0.075, 0.06, 0.18], pos: [0, -0.04, -0.34], color: WOOD },
-      { size: [0.07, 0.1, 0.3], pos: [0, -0.005, 0.0], color: DARK },
-      { size: [0.055, 0.12, 0.3], pos: [0, -0.03, 0.27], color: WOOD, rotX: -0.12 },
-      { size: [0.012, 0.02, 0.012], pos: [0, 0.058, -0.58], color: LIGHT },
-    ],
-    muzzle: [0, 0.025, -0.62], hip: [0.2, -0.2, -0.3], adsY: -0.1, adsZ: -0.25,
-  },
-  { // Rifle
-    parts: [
-      { size: [0.065, 0.09, 0.5], pos: [0, 0, -0.2], color: DARK },
-      { size: [0.03, 0.03, 0.26], pos: [0, 0.015, -0.58], color: LIGHT },
-      { size: [0.05, 0.17, 0.07], pos: [0, -0.125, -0.15], color: MID, rotX: 0.2 },
-      { size: [0.045, 0.1, 0.06], pos: [0, -0.085, 0.02], color: MID, rotX: 0.2 },
-      { size: [0.055, 0.1, 0.27], pos: [0, -0.01, 0.27], color: MID, rotX: -0.08 },
-      { size: [0.03, 0.04, 0.05], pos: [0, 0.065, -0.05], color: LIGHT },
-      { size: [0.012, 0.03, 0.012], pos: [0, 0.07, -0.42], color: LIGHT },
-    ],
-    muzzle: [0, 0.015, -0.72], hip: [0.2, -0.2, -0.36], adsY: -0.135, adsZ: -0.27,
-  },
-  { // Sniper
-    parts: [
-      { size: [0.06, 0.09, 0.55], pos: [0, 0, -0.2], color: DARK },
-      { size: [0.035, 0.035, 0.6], pos: [0, 0.012, -0.76], color: LIGHT },
-      { size: [0.055, 0.055, 0.24], pos: [0, 0.095, -0.18], color: MID },
-      { size: [0.075, 0.075, 0.04], pos: [0, 0.095, -0.31], color: LIGHT },
-      { size: [0.05, 0.12, 0.34], pos: [0, -0.02, 0.32], color: WOOD, rotX: -0.1 },
-      { size: [0.045, 0.1, 0.06], pos: [0, -0.085, 0.02], color: MID, rotX: 0.2 },
-    ],
-    muzzle: [0, 0.012, -1.07], hip: [0.2, -0.2, -0.3], adsY: -0.16, adsZ: -0.25,
-  },
-];
 
 export class ViewModel {
   readonly scene = new THREE.Scene();
   readonly camera = new THREE.PerspectiveCamera(60, 1, 0.01, 10);
   private guns: THREE.Group[] = [];
+  private hands: THREE.Group[][] = [];
   private flashes: THREE.Mesh[] = [];
   private current = 0;
   private kickBack = 0; // how far the gun is thrown back by the last shots
@@ -94,29 +44,16 @@ export class ViewModel {
     sun.position.set(0.5, 1, 0.8);
     this.scene.add(sun);
 
-    for (const spec of GUNS) {
-      const g = new THREE.Group();
-      for (const p of spec.parts) {
-        const m = new THREE.Mesh(
-          new THREE.BoxGeometry(...p.size),
-          new THREE.MeshStandardMaterial({ color: p.color, roughness: 0.7, metalness: 0.3 }),
-        );
-        m.position.set(...p.pos);
-        if (p.rotX) m.rotation.x = p.rotX;
-        g.add(m);
-      }
-      const flash = new THREE.Mesh(
-        new THREE.BoxGeometry(0.07, 0.07, 0.05),
-        new THREE.MeshBasicMaterial({ color: 0xffd27a, transparent: true, opacity: 0.95 }),
-      );
-      flash.position.set(...spec.muzzle);
-      flash.visible = false;
-      g.add(flash);
+    GUNS.forEach((spec, i) => {
+      const { group: g, flash } = buildGun(i);
+      const hands = [buildHand(spec.rightHand, 0.25), buildHand(spec.leftHand, -0.4)];
+      g.add(...hands);
+      this.hands.push(hands);
       g.visible = false;
       this.scene.add(g);
       this.guns.push(g);
       this.flashes.push(flash);
-    }
+    });
     this.guns[0].visible = true;
   }
 
@@ -145,6 +82,7 @@ export class ViewModel {
     const g = this.guns[this.current];
     const scopeHides = WEAPONS[this.current].scope && ads > 0.8;
     g.visible = visible && !scopeHides;
+    for (const h of this.hands[this.current]) h.visible = ads < 0.35; // looking down the sights, you see the sights, not your arms
 
     this.kickBack *= Math.exp(-dt * 14);
     this.swap = Math.min(1, this.swap + dt * 4.5);

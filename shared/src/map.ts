@@ -18,6 +18,7 @@ export interface GameMap {
   name: string;
   size: 'small' | 'medium';
   maxPlayers: number;
+  sky?: string; // sky and fog colour as #rrggbb; the client has a default
   bounds: { min: Vec3; max: Vec3 };
   boxes: Box[];
   spawns: Spawn[];
@@ -75,5 +76,6 @@ export function parseMap(raw: unknown): GameMap {
     };
   });
 
-  return { name: raw.name, size: raw.size, maxPlayers, bounds, boxes, spawns };
+  if (raw.sky !== undefined && (typeof raw.sky !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(raw.sky))) fail('sky', 'must look like #a1b2c3');
+  return { name: raw.name, size: raw.size, maxPlayers, sky: raw.sky as string | undefined, bounds, boxes, spawns };
 }

@@ -25,11 +25,11 @@ test('parseClientMessage accepts the lobby messages and clamps settings to the a
   assert.deepStrictEqual(parseClientMessage('{"t":"join","id":3}'), { t: 'join', id: 3 });
   assert.deepStrictEqual(
     parseClientMessage('{"t":"create","name":"Fun","scoreLimit":10,"timeLimit":600}'),
-    { t: 'create', name: 'Fun', scoreLimit: 10, timeLimit: 600 },
+    { t: 'create', name: 'Fun', scoreLimit: 10, timeLimit: 600, map: '' },
   );
   assert.deepStrictEqual(
     parseClientMessage('{"t":"create","name":"x","scoreLimit":99999,"timeLimit":-5}'),
-    { t: 'create', name: 'x', scoreLimit: LOBBY.defaultScoreLimit, timeLimit: LOBBY.defaultTimeLimit },
+    { t: 'create', name: 'x', scoreLimit: LOBBY.defaultScoreLimit, timeLimit: LOBBY.defaultTimeLimit, map: '' },
     'a made-up score or time limit falls back to the default',
   );
 });

@@ -1,6 +1,7 @@
 {
-  "name": "Test Arena",
+  "name": "Courtyard",
   "size": "medium",
+  "sky": "#9fb4c8",
   "maxPlayers": 8,
   "bounds": { "min": [-21, -1, -21], "max": [21, 10, 21] },
   "boxes": [

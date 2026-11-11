@@ -13,9 +13,9 @@ function minutes(seconds: number): string {
 
 export interface LobbyHandlers {
   onQuick(): void;
-  onCreate(name: string, scoreLimit: number, timeLimit: number): void;
+  onCreate(name: string, scoreLimit: number, timeLimit: number, map: string): void;
   onJoin(id: number): void;
-  onOffline(): void;
+  onOffline(map: string): void;
   onNameChange(name: string): void;
   onVolume(volume: number): void;
 }
@@ -29,7 +29,7 @@ export class LobbyUI {
   private buttons: HTMLButtonElement[] = [];
   private joinButtons: HTMLButtonElement[] = [];
 
-  constructor(h: LobbyHandlers, volume: number) {
+  constructor(h: LobbyHandlers, volume: number, maps: Array<{ name: string; size: string; players: number }>) {
     try {
       this.nickEl.value = localStorage.getItem(NAME_KEY) ?? '';
     } catch {
@@ -40,12 +40,16 @@ export class LobbyUI {
     const time = $('mtime') as HTMLSelectElement;
     for (const v of LOBBY.timeLimits) time.add(new Option(`${v / 60} min`, String(v), v === LOBBY.defaultTimeLimit, v === LOBBY.defaultTimeLimit));
 
+    const mapSelect = $('mmap') as HTMLSelectElement;
+    mapSelect.add(new Option('Random map', ''));
+    for (const m of maps) mapSelect.add(new Option(`${m.name} (${m.size}, up to ${m.players})`, m.name));
+
     const quick = $('quick') as HTMLButtonElement;
     const create = $('create') as HTMLButtonElement;
     this.buttons = [quick, create];
     quick.addEventListener('click', () => h.onQuick());
-    create.addEventListener('click', () => h.onCreate(($('mname') as HTMLInputElement).value, Number(score.value), Number(time.value)));
-    $('offline').addEventListener('click', () => h.onOffline());
+    create.addEventListener('click', () => h.onCreate(($('mname') as HTMLInputElement).value, Number(score.value), Number(time.value), mapSelect.value));
+    $('offline').addEventListener('click', () => h.onOffline(mapSelect.value));
     const commitName = (): void => {
       try {
         localStorage.setItem(NAME_KEY, this.nickEl.value);

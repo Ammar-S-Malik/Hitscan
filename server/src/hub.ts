@@ -139,11 +139,11 @@ export class Hub {
       case 'quick': {
         const open = [...this.matches.values()].filter((m) => !m.isFull).sort((a, b) => b.size - a.size)[0];
         if (open) this.enter(c, open);
-        else this.createAndEnter(c, '', LOBBY.defaultScoreLimit, LOBBY.defaultTimeLimit);
+        else this.createAndEnter(c, '', LOBBY.defaultScoreLimit, LOBBY.defaultTimeLimit, '');
         break;
       }
       case 'create':
-        this.createAndEnter(c, msg.name, msg.scoreLimit, msg.timeLimit);
+        this.createAndEnter(c, msg.name, msg.scoreLimit, msg.timeLimit, msg.map);
         break;
     }
   }
@@ -186,12 +186,19 @@ export class Hub {
     return [...this.matches.values()].map((m) => m.info());
   }
 
-  private createAndEnter(c: Client, name: string, scoreLimit: number, timeLimit: number): void {
+  private createAndEnter(c: Client, name: string, scoreLimit: number, timeLimit: number, mapName: string): void {
     if (this.matches.size >= this.maxMatches) {
       this.say(c, { t: 'error', message: 'The server is busy: every match slot is taken. Try again in a minute.' });
       return;
     }
-    const map = this.maps[0];
+    // The map asked for, or a random one (preferring one that is not already being played).
+    let map = this.maps.find((m) => m.name === mapName);
+    if (!map) {
+      const inUse = new Set([...this.matches.values()].map((m) => m.info().map));
+      const fresh = this.maps.filter((m) => !inUse.has(m.name));
+      const pool = fresh.length > 0 ? fresh : this.maps;
+      map = pool[Math.floor(Math.random() * pool.length)];
+    }
     const id = this.nextMatchId++;
     const match = new Match({
       id,

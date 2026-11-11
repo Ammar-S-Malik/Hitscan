@@ -9,3 +9,4 @@ export * from './interp.ts';
 export * from './hitscan.ts';
 export * from './combat.ts';
 export * from './lobby.ts';
+export * from './mapcheck.ts';
