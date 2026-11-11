@@ -8,7 +8,7 @@ export interface NetOptions {
   lossPct: number; // ?loss=5     - percent of messages thrown away, each way
 }
 
-export function parseNetOptions(search: string, hostname: string): NetOptions {
+export function parseNetOptions(search: string, hostname: string, defaultUrl?: string): NetOptions {
   const q = new URLSearchParams(search);
   const num = (key: string): number => {
     const v = Number(q.get(key));
@@ -16,7 +16,7 @@ export function parseNetOptions(search: string, hostname: string): NetOptions {
   };
   return {
     offline: q.has('offline'),
-    url: q.get('server') ?? `ws://${hostname || 'localhost'}:8787`,
+    url: q.get('server') ?? (defaultUrl ? defaultUrl : `ws://${hostname || 'localhost'}:8787`),
     lagMs: num('lag'),
     jitterMs: num('jitter'),
     lossPct: Math.min(100, num('loss')),
@@ -27,6 +27,7 @@ export interface NetHandlers {
   onOpen(): void;
   onClose(): void;
   onMessage(bytes: Uint8Array): void;
+  onText(text: string): void;
 }
 
 /** A WebSocket to the game server, with an optional simulated bad network in both directions. */
@@ -59,6 +60,10 @@ export class NetClient {
     ws.onclose = () => handlers.onClose();
     ws.onerror = () => undefined; // a close event always follows
     ws.onmessage = (ev: MessageEvent) => {
+      if (typeof ev.data === 'string') {
+        handlers.onText(ev.data);
+        return;
+      }
       if (!(ev.data instanceof ArrayBuffer)) return;
       const bytes = new Uint8Array(ev.data);
       if (this.simulated) down.send(bytes);
@@ -69,6 +74,11 @@ export class NetClient {
   send(bytes: Uint8Array): void {
     if (this.simulated && this.up) this.up.send(bytes);
     else this.sendNow(bytes);
+  }
+
+  /** A lobby message (JSON text). Not delayed by the simulated network. */
+  sendText(message: object): void {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(message));
   }
 
   private sendNow(bytes: Uint8Array): void {

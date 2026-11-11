@@ -1,3 +1,4 @@
+import { WEAPON_COUNT } from '@hitscan/shared';
 import type { Input } from '@hitscan/shared';
 
 const SENSITIVITY = 0.0022; // radians per mouse pixel
@@ -24,6 +25,12 @@ export class InputState {
   private respawnLatch = false;
   private fireHeld = false;
   private fireLatch = false;
+  /** Right mouse button: aiming down sights. */
+  aimHeld = false;
+  /** The gun that is out: an index into WEAPONS. Keys 1-5 or the mouse wheel change it. */
+  weapon = 0;
+  /** Mouse movement is scaled by this, so aiming through a zoomed view is not twitchy. */
+  sensitivityScale = 1;
   /** True while Tab is held: the scoreboard is shown. */
   showScores = false;
   private canvas: HTMLElement;
@@ -40,6 +47,8 @@ export class InputState {
       if (e.code === 'Space') this.jumpLatch = true;
       if (e.code === 'KeyC') this.slideLatch = true;
       if (e.code === 'KeyR') this.respawnLatch = true;
+      const digit = e.code.startsWith('Digit') ? Number(e.code.slice(5)) : 0;
+      if (digit >= 1 && digit <= WEAPON_COUNT) this.weapon = digit - 1;
     });
     window.addEventListener('keyup', (e) => {
       this.keys.delete(e.code);
@@ -48,19 +57,31 @@ export class InputState {
     window.addEventListener('blur', () => {
       this.keys.clear();
       this.fireHeld = false;
+      this.aimHeld = false;
       this.showScores = false;
     });
 
     // The trigger is the left mouse button. A press and release between two ticks is latched so a
     // quick click still fires once.
     window.addEventListener('mousedown', (e) => {
-      if (e.button !== 0 || document.pointerLockElement !== this.canvas) return;
-      this.fireHeld = true;
-      this.fireLatch = true;
+      if (document.pointerLockElement !== this.canvas) return;
+      if (e.button === 0) {
+        this.fireHeld = true;
+        this.fireLatch = true;
+      } else if (e.button === 2) {
+        this.aimHeld = true;
+      }
     });
     window.addEventListener('mouseup', (e) => {
       if (e.button === 0) this.fireHeld = false;
+      if (e.button === 2) this.aimHeld = false;
     });
+    window.addEventListener('contextmenu', (e) => e.preventDefault());
+    window.addEventListener('wheel', (e) => {
+      if (document.pointerLockElement !== this.canvas || e.deltaY === 0) return;
+      const step = e.deltaY > 0 ? 1 : -1;
+      this.weapon = (this.weapon + step + WEAPON_COUNT) % WEAPON_COUNT;
+    }, { passive: true });
 
     document.addEventListener('mousemove', (e) => {
       if (document.pointerLockElement !== this.canvas) return;
@@ -70,8 +91,8 @@ export class InputState {
         return;
       }
       if (stepSize > this.peakStep) this.peakStep = stepSize;
-      this.yaw -= e.movementX * SENSITIVITY; // mouse right = turn right = yaw down
-      this.pitch -= e.movementY * SENSITIVITY; // mouse up = look up
+      this.yaw -= e.movementX * SENSITIVITY * this.sensitivityScale; // mouse right = turn right = yaw down
+      this.pitch -= e.movementY * SENSITIVITY * this.sensitivityScale; // mouse up = look up
       this.pitch = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, this.pitch));
     });
 
@@ -79,6 +100,7 @@ export class InputState {
       if (document.pointerLockElement !== this.canvas) {
         this.keys.clear();
         this.fireHeld = false;
+        this.aimHeld = false;
         this.showScores = false;
       }
     });
@@ -96,12 +118,19 @@ export class InputState {
       slide: k.has('KeyC') || this.slideLatch,
       pitch: this.pitch,
       fire: this.fireHeld || this.fireLatch,
+      weapon: this.weapon,
+      aim: this.aimHeld,
       viewMs: 0, // filled in by the caller once it knows which moment of the server's time it is looking at
     };
     this.jumpLatch = false;
     this.slideLatch = false;
     this.fireLatch = false;
     return input;
+  }
+
+  /** Kick the view up, as recoil does. */
+  kick(radians: number): void {
+    this.pitch = Math.min(PITCH_LIMIT, this.pitch + radians);
   }
 
   /** True once per press of the respawn key. */

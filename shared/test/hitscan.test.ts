@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { COMBAT } from '../src/config.ts';
+import { COMBAT, WEAPONS } from '../src/config.ts';
 import { FireControl } from '../src/combat.ts';
 import { aimDirection, rayBox, traceShot, traceWorld } from '../src/hitscan.ts';
 import type { Target } from '../src/hitscan.ts';
@@ -72,16 +72,53 @@ test('a shot at a player to the side (any yaw) lands where the maths says', () =
   }
 });
 
-test('FireControl fires once per interval while the trigger is held, never while dead, and restarts on release', () => {
+test('FireControl: automatic guns repeat at their rate, semi-automatic ones need a new click', () => {
+  const rifle = 3;
+  const pistol = 0;
   const f = new FireControl();
+  f.tick(false, true, rifle); // take the rifle out
+  for (let i = 0; i < WEAPONS[rifle].switchTicks; i++) f.tick(false, true, rifle);
   const fired: number[] = [];
-  for (let i = 0; i < 40; i++) if (f.tick(true, true)) fired.push(i);
-  assert.deepStrictEqual(fired, [0, COMBAT.fireIntervalTicks, COMBAT.fireIntervalTicks * 2, COMBAT.fireIntervalTicks * 3]);
+  for (let i = 0; i < 30; i++) if (f.tick(true, true, rifle)) fired.push(i);
+  const r = WEAPONS[rifle].intervalTicks;
+  assert.deepStrictEqual(fired, [0, r, r * 2, r * 3, r * 4]);
+
   const g = new FireControl();
-  for (let i = 0; i < 30; i++) assert.equal(g.tick(true, false), false);
-  assert.equal(g.tick(true, true), true, 'dead time does not build up a delay');
+  for (let i = 0; i < 40; i++) g.tick(false, true, pistol);
+  let shots = 0;
+  for (let i = 0; i < 100; i++) if (g.tick(true, true, pistol)) shots++;
+  assert.equal(shots, 1, 'holding a pistol fires once');
+  for (let i = 0; i < 20; i++) g.tick(false, true, pistol);
+  assert.equal(g.tick(true, true, pistol), true, 'a new click fires again once the gun is ready');
+});
+
+test('FireControl: dead players do not fire, tapping faster than the fire rate does not help, bad weapon numbers mean the pistol', () => {
+  const g = new FireControl();
+  for (let i = 0; i < 30; i++) assert.equal(g.tick(true, false, 0), false);
+  g.tick(false, true, 0);
+  assert.equal(g.tick(true, true, 0), true);
+  assert.equal(g.tick(false, true, 0), false);
+  assert.equal(g.tick(true, true, 0), false, 'still cooling down');
   const h = new FireControl();
-  assert.equal(h.tick(true, true), true);
-  assert.equal(h.tick(false, true), false);
-  assert.equal(h.tick(true, true), false, 'tapping faster than the fire rate does not help');
+  for (let i = 0; i < 40; i++) h.tick(false, true, 99);
+  assert.equal(h.weapon, 0);
+  assert.equal(h.tick(true, true, 99), true);
+});
+
+test('taking a gun out has a delay, and swapping cannot skip the wait after a shot', () => {
+  /** Ticks until a gun fires when clicking on every other tick, starting with `f` in its current state. */
+  const ticksToFire = (f: FireControl, weapon: number): number => {
+    for (let t = 0; t < 400; t++) if (f.tick(t % 2 === 1, true, weapon)) return t;
+    return -1;
+  };
+  const f = new FireControl();
+  for (let i = 0; i < 40; i++) f.tick(false, true, 0);
+  const first = ticksToFire(f, 4); // sniper just taken out
+  assert.ok(first >= WEAPONS[4].switchTicks - 1, `sniper fired after ${first} ticks`);
+
+  const g = new FireControl();
+  for (let i = 0; i < 100; i++) g.tick(false, true, 4);
+  assert.equal(g.tick(true, true, 4), true); // a sniper shot, then a 78 tick recovery
+  const wait = ticksToFire(g, 0); // swap to the pistol straight away
+  assert.ok(wait >= WEAPONS[4].intervalTicks - 6, `the pistol had to wait ${wait} ticks for the sniper's recovery`);
 });

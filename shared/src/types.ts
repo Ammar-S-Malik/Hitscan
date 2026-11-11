@@ -23,6 +23,8 @@ export interface Input {
   slide: boolean;
   pitch: number; // looking up is positive; only used for aiming, never for movement
   fire: boolean; // trigger held
+  weapon: number; // which gun is out: an index into WEAPONS
+  aim: boolean; // aiming down sights (tighter spread)
   /**
    * Lag compensation: the server time, in milliseconds, that the shooter's screen was showing other
    * players at when this input was made. Only read when `fire` is true.

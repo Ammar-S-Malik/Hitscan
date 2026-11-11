@@ -59,15 +59,10 @@ export const NET = {
   fallLimit: -30, // server: below this height a player is respawned
 } as const;
 
-/**
- * Combat. One weapon for now; Stage 4 turns this into a table of five guns.
- */
+/** Combat rules that are the same for every gun. Per-gun numbers are in WEAPONS below. */
 export const COMBAT = {
   maxHealth: 100,
-  damage: 25,
-  headMultiplier: 2, // a hit in the top `headHeight` of the body does this much more damage
-  headHeight: 0.3,
-  fireIntervalTicks: 12, // 5 shots a second while the trigger is held
+  headHeight: 0.3, // a hit in the top 30 cm of the body is a head shot
   maxRange: 200,
   respawnTicks: 3 * TICK_RATE, // how long a dead player waits
   spawnShieldTicks: 90, // a freshly respawned player can't be hurt for this long
@@ -75,3 +70,51 @@ export const COMBAT = {
   historyTicks: 40, // how many ticks of player positions the server remembers (must cover maxRewindMs)
   teleportDistance: 3, // positions further apart than this between two ticks are a respawn, not movement
 } as const;
+
+export interface WeaponDef {
+  name: string;
+  damage: number; // per pellet, before head shots and distance falloff
+  pellets: number; // rays per shot (the shotgun fires several)
+  headMultiplier: number;
+  intervalTicks: number; // ticks between shots (60 ticks = 1 second)
+  auto: boolean; // true: hold to keep firing. false: one shot per click
+  spread: number; // radians of random cone when firing from the hip
+  adsSpread: number; // the same while aiming down sights
+  falloffStart: number; // metres: full damage up to here
+  falloffEnd: number; // metres: from here on, only `falloffMin` of the damage
+  falloffMin: number;
+  switchTicks: number; // delay before firing after switching to this gun
+  adsFov: number; // degrees while aiming down sights (the normal view is 75)
+  scope: boolean; // draw a scope instead of the gun when aiming
+  recoil: number; // radians the view kicks up per shot (client only)
+}
+
+/** The five guns, in key order (1 to 5). The index is what travels over the network. */
+export const WEAPONS: readonly WeaponDef[] = [
+  {
+    name: 'Pistol', damage: 22, pellets: 1, headMultiplier: 2, intervalTicks: 10, auto: false,
+    spread: 0.006, adsSpread: 0.0015, falloffStart: 30, falloffEnd: 80, falloffMin: 0.7,
+    switchTicks: 10, adsFov: 62, scope: false, recoil: 0.012,
+  },
+  {
+    name: 'SMG', damage: 12, pellets: 1, headMultiplier: 1.5, intervalTicks: 4, auto: true,
+    spread: 0.03, adsSpread: 0.012, falloffStart: 15, falloffEnd: 45, falloffMin: 0.5,
+    switchTicks: 12, adsFov: 64, scope: false, recoil: 0.006,
+  },
+  {
+    name: 'Shotgun', damage: 12, pellets: 8, headMultiplier: 1.5, intervalTicks: 48, auto: false,
+    spread: 0.07, adsSpread: 0.05, falloffStart: 8, falloffEnd: 25, falloffMin: 0.15,
+    switchTicks: 20, adsFov: 66, scope: false, recoil: 0.04,
+  },
+  {
+    name: 'Rifle', damage: 28, pellets: 1, headMultiplier: 2, intervalTicks: 7, auto: true,
+    spread: 0.012, adsSpread: 0.002, falloffStart: 40, falloffEnd: 100, falloffMin: 0.7,
+    switchTicks: 15, adsFov: 52, scope: false, recoil: 0.01,
+  },
+  {
+    name: 'Sniper', damage: 90, pellets: 1, headMultiplier: 2, intervalTicks: 78, auto: false,
+    spread: 0.04, adsSpread: 0, falloffStart: 1000, falloffEnd: 1001, falloffMin: 1,
+    switchTicks: 30, adsFov: 18, scope: true, recoil: 0.05,
+  },
+];
+export const WEAPON_COUNT = WEAPONS.length;

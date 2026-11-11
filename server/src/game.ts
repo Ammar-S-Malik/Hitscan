@@ -8,7 +8,7 @@
  * never takes a position from a client. Clients send only inputs.
  */
 import {
-  COMBAT, FireControl, NET, TICK_RATE, aimDirection, createPlayer, decodeInputPacket, encodeEvents, encodeReject,
+  COMBAT, FireControl, NET, TICK_RATE, createPlayer, pelletDamage, pelletDirections, shotSeed, weaponOf, decodeInputPacket, encodeEvents, encodeReject,
   encodeSnapshot, encodeWelcome, eyeHeight, step, traceShot, REJECT_FULL,
 } from '@hitscan/shared';
 import type { Box, GameMap, Input, PlayerState, RemotePlayer, SeqInput, ShotEvent, Spawn, Target } from '@hitscan/shared';
@@ -66,6 +66,8 @@ export interface PlayerInfo {
 
 export class GameServer {
   tickCount = 0;
+  /** When false (between rounds) nobody can shoot, but everyone can still move. */
+  combatEnabled = true;
   private map: GameMap;
   private boxes: readonly Box[];
   private maxPlayers: number;
@@ -92,6 +94,21 @@ export class GameServer {
       state: p.state, lastSeq: p.lastSeq, processed: p.processed, dropped: p.dropped, queued: p.queue.length,
       health: p.health, alive: p.alive, kills: p.kills, deaths: p.deaths,
     };
+  }
+
+  /** Everyone's score, for the scoreboard. */
+  scores(): Array<{ id: number; kills: number; deaths: number }> {
+    return [...this.players.values()].map((p) => ({ id: p.id, kills: p.kills, deaths: p.deaths }));
+  }
+
+  /** Start a fresh round: scores to zero, everyone back at a spawn point with full health. */
+  resetRound(): void {
+    for (const p of this.players.values()) {
+      p.kills = 0;
+      p.deaths = 0;
+      p.alive = true;
+      this.respawn(p);
+    }
   }
 
   /** A new connection. Returns the player id, or null if the server is full. */
@@ -202,7 +219,7 @@ export class GameServer {
           p.processed++;
           p.budget -= 1;
           applied++;
-          if (p.fire.tick(input.fire, p.alive)) this.shoot(p, input);
+          if (p.fire.tick(input.fire && this.combatEnabled, p.alive, input.weapon)) this.shoot(p, input, q.seq);
         }
         if (p.queue.length === 0) p.buffering = true; // ran dry: let it refill before moving again
       }
@@ -227,39 +244,46 @@ export class GameServer {
     p.fire.reset();
   }
 
-  /** Resolve one shot. The ray starts where the shooter is now; the targets are rewound to what the shooter saw. */
-  private shoot(shooter: ServerPlayer, input: Input): void {
+  /**
+   * Resolve one shot: one ray, or several for a shotgun. The rays start where the shooter is now; the
+   * targets are rewound to what the shooter saw. The spread is seeded from the input, so the client can
+   * draw exactly the same rays.
+   */
+  private shoot(shooter: ServerPlayer, input: Input, seq: number): void {
+    const weapon = weaponOf(input.weapon);
     const origin: [number, number, number] = [
       shooter.state.x, shooter.state.y + eyeHeight(shooter.state), shooter.state.z,
     ];
-    const dir = aimDirection(input.yaw, input.pitch);
+    const rays = pelletDirections(weapon, input.yaw, input.pitch, input.aim, shotSeed(seq, shooter.id));
     const targets = this.targetsAt(input.viewMs, shooter.id);
-    const r = traceShot(origin, dir, this.boxes, targets);
-
-    let damage = 0;
-    let killed = false;
-    const victim = r.victim ? this.players.get(r.victim) : undefined;
-    if (victim && victim.alive && this.tickCount >= victim.shieldUntil) {
-      damage = Math.round(COMBAT.damage * (r.headshot ? COMBAT.headMultiplier : 1));
-      victim.health -= damage;
-      if (victim.health <= 0) {
-        victim.health = 0;
-        victim.alive = false;
-        victim.respawnAt = this.tickCount + COMBAT.respawnTicks;
-        victim.deaths++;
-        shooter.kills++;
-        killed = true;
+    for (const dir of rays) {
+      const r = traceShot(origin, dir, this.boxes, targets);
+      let damage = 0;
+      let killed = false;
+      const victim = r.victim ? this.players.get(r.victim) : undefined;
+      if (victim && victim.alive && this.tickCount >= victim.shieldUntil) {
+        damage = pelletDamage(weapon, r.distance, r.headshot);
+        victim.health -= damage;
+        if (victim.health <= 0) {
+          victim.health = 0;
+          victim.alive = false;
+          victim.respawnAt = this.tickCount + COMBAT.respawnTicks;
+          victim.deaths++;
+          shooter.kills++;
+          killed = true;
+        }
       }
+      this.events.push({
+        shooter: shooter.id,
+        victim: victim ? victim.id : 0,
+        headshot: r.headshot && damage > 0,
+        killed,
+        damage,
+        weapon: input.weapon,
+        origin,
+        end: r.end,
+      });
     }
-    this.events.push({
-      shooter: shooter.id,
-      victim: victim ? victim.id : 0,
-      headshot: r.headshot && damage > 0,
-      killed,
-      damage,
-      origin,
-      end: r.end,
-    });
   }
 
   private recordHistory(): void {

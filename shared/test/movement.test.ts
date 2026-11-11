@@ -66,8 +66,8 @@ test('step never modifies the state it is given', () => {
 
 test('garbage input (NaN, huge values) cannot corrupt the state', () => {
   let s = landed(0, 0, 0, FLAT);
-  s = step(s, { forward: NaN, strafe: Infinity, yaw: NaN, jump: false, sprint: true, slide: false, pitch: 0, fire: false, viewMs: 0 }, FLAT);
-  s = step(s, { forward: 1e9, strafe: -1e9, yaw: 1e9, jump: false, sprint: true, slide: false, pitch: 0, fire: false, viewMs: 0 }, FLAT);
+  s = step(s, { forward: NaN, strafe: Infinity, yaw: NaN, jump: false, sprint: true, slide: false, pitch: 0, fire: false, weapon: 0, aim: false, viewMs: 0 }, FLAT);
+  s = step(s, { forward: 1e9, strafe: -1e9, yaw: 1e9, jump: false, sprint: true, slide: false, pitch: 0, fire: false, weapon: 0, aim: false, viewMs: 0 }, FLAT);
   for (const v of Object.values(s)) if (typeof v === 'number') assert.ok(Number.isFinite(v));
   assert.ok(hspeed(s) <= MOVE.maxHorizontalSpeed + 1e-9);
 });

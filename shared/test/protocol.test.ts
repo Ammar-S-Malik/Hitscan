@@ -31,6 +31,7 @@ test('an input survives the wire exactly as quantizeInput says it will (what pre
       forward: rand() * 2 - 1, strafe: rand() * 2 - 1, yaw: (rand() - 0.5) * 20,
       jump: rand() < 0.5, sprint: rand() < 0.5, slide: rand() < 0.5,
       pitch: (rand() - 0.5) * 4, fire: rand() < 0.5, viewMs: Math.floor(rand() * 4e9),
+      weapon: Math.floor(rand() * 5), aim: rand() < 0.5,
     });
     const decoded = decodeInputPacket(encodeInputPacket([{ seq: 4000000000 + n, input: raw }]));
     assert.ok(decoded);
@@ -115,16 +116,16 @@ test('random garbage never makes a decoder throw (fuzz)', () => {
 
 test('shot events round-trip and reject a wrong length or non-finite positions', () => {
   const events: ShotEvent[] = [
-    { shooter: 3, victim: 9, headshot: true, killed: false, damage: 50, origin: [1.5, 1.625, -2.25], end: [10, 1.5, -20] },
-    { shooter: 65535, victim: 0, headshot: false, killed: false, damage: 0, origin: [0, 0, 0], end: [-0.5, 3, 8] },
-    { shooter: 1, victim: 2, headshot: false, killed: true, damage: 25, origin: [0, 0, 0], end: [1, 1, 1] },
+    { shooter: 3, victim: 9, headshot: true, killed: false, damage: 50, weapon: 4, origin: [1.5, 1.625, -2.25], end: [10, 1.5, -20] },
+    { shooter: 65535, victim: 0, headshot: false, killed: false, damage: 0, weapon: 0, origin: [0, 0, 0], end: [-0.5, 3, 8] },
+    { shooter: 1, victim: 2, headshot: false, killed: true, damage: 25, weapon: 2, origin: [0, 0, 0], end: [1, 1, 1] },
   ];
   const bytes = encodeEvents(events);
   assert.deepStrictEqual(decodeServerMessage(bytes), { kind: 'events', events });
   assert.equal(decodeServerMessage(bytes.slice(0, bytes.length - 1)), null, 'truncated');
   assert.equal(decodeServerMessage(new Uint8Array([...bytes, 0])), null, 'trailing byte');
   const bad = bytes.slice();
-  new DataView(bad.buffer).setFloat32(2 + 6, NaN, true);
+  new DataView(bad.buffer).setFloat32(2 + 7, NaN, true);
   assert.equal(decodeServerMessage(bad), null, 'NaN position');
 });
 
@@ -136,4 +137,21 @@ test('aim and trigger fields quantize safely: pitch is clamped, view time is a w
   assert.equal(r.pitch, 0);
   assert.equal(r.viewMs, 0);
   assert.equal(quantizeInput(input({ viewMs: 1234.6 })).viewMs, 1235);
+});
+
+test('weapon and aim travel in the input flags, and a hostile weapon number falls back to the pistol', () => {
+  for (let weapon = 0; weapon < 5; weapon++) {
+    const d = decodeInputPacket(encodeInputPacket([{ seq: 1, input: quantizeInput(input({ weapon, aim: weapon % 2 === 0, fire: true })) }]))!;
+    assert.equal(d[0].input.weapon, weapon);
+    assert.equal(d[0].input.aim, weapon % 2 === 0);
+    assert.equal(d[0].input.fire, true);
+  }
+  const buf = encodeInputPacket([{ seq: 1, input: quantizeInput(input({ jump: true })) }]);
+  buf[2 + 14] |= 7 << 5; // weapon 7 does not exist
+  const bad = decodeInputPacket(buf)!;
+  assert.equal(bad[0].input.weapon, 0);
+  assert.equal(bad[0].input.jump, true, 'the other flags are untouched');
+  assert.equal(quantizeInput(input({ weapon: 99 })).weapon, 0);
+  assert.equal(quantizeInput(input({ weapon: 2.5 })).weapon, 0);
+  assert.equal(quantizeInput(input({ weapon: NaN })).weapon, 0);
 });

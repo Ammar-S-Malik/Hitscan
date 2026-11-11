@@ -2,8 +2,10 @@
  * Hitscan: a shot is an instant ray, not a flying bullet. This file is pure geometry, with no
  * state, so the server (for the truth) and the client (for the tracer it draws) agree.
  */
-import { BODY, COMBAT } from './config.ts';
+import { BODY, COMBAT, WEAPONS } from './config.ts';
+import type { WeaponDef } from './config.ts';
 import type { Box, Vec3 } from './map.ts';
+import { createRng } from './netsim.ts';
 
 /** The unit vector a player looks along. Yaw 0 looks toward -Z, positive yaw turns left, positive pitch looks up. */
 export function aimDirection(yaw: number, pitch: number): Vec3 {
@@ -93,4 +95,57 @@ export function traceShot(origin: Vec3, dir: Vec3, boxes: readonly Box[], target
     victim,
     headshot,
   };
+}
+
+export function weaponOf(index: number): WeaponDef {
+  return WEAPONS[index] ?? WEAPONS[0];
+}
+
+/**
+ * The seed for one shot's random spread. Both the server and the client work it out from the
+ * input's sequence number and the player's id, so the client can draw exactly the rays the server
+ * will fire without being told.
+ */
+export function shotSeed(seq: number, playerId: number): number {
+  return (Math.imul(seq >>> 0, 2654435761) ^ Math.imul(playerId + 1, 40503)) >>> 0;
+}
+
+/**
+ * The rays for one shot: the aim direction, scattered inside a cone for each pellet. The cone is
+ * narrower when aiming down sights. Pure and seeded, so identical on the server and the client.
+ */
+export function pelletDirections(weapon: WeaponDef, yaw: number, pitch: number, aiming: boolean, seed: number): Vec3[] {
+  const f = aimDirection(yaw, pitch);
+  const spread = aiming ? weapon.adsSpread : weapon.spread;
+  if (spread <= 0) return Array.from({ length: weapon.pellets }, () => [f[0], f[1], f[2]] as Vec3);
+  const rand = createRng(seed);
+  const y = Number.isFinite(yaw) ? yaw : 0;
+  const right: Vec3 = [Math.cos(y), 0, -Math.sin(y)];
+  // up = right x forward
+  const up: Vec3 = [
+    right[1] * f[2] - right[2] * f[1],
+    right[2] * f[0] - right[0] * f[2],
+    right[0] * f[1] - right[1] * f[0],
+  ];
+  const out: Vec3[] = [];
+  for (let i = 0; i < weapon.pellets; i++) {
+    const r = Math.tan(spread) * Math.sqrt(rand()); // uniform over the disc
+    const a = rand() * Math.PI * 2;
+    const ox = Math.cos(a) * r;
+    const oy = Math.sin(a) * r;
+    const d: Vec3 = [f[0] + right[0] * ox + up[0] * oy, f[1] + right[1] * ox + up[1] * oy, f[2] + right[2] * ox + up[2] * oy];
+    const len = Math.hypot(d[0], d[1], d[2]);
+    out.push([d[0] / len, d[1] / len, d[2] / len]);
+  }
+  return out;
+}
+
+/** Damage of one pellet that travelled `distance` metres: full up to falloffStart, fading to falloffMin at falloffEnd. */
+export function pelletDamage(weapon: WeaponDef, distance: number, headshot: boolean): number {
+  let scale = 1;
+  if (distance > weapon.falloffStart) {
+    const t = Math.min(1, (distance - weapon.falloffStart) / (weapon.falloffEnd - weapon.falloffStart));
+    scale = 1 - (1 - weapon.falloffMin) * t;
+  }
+  return Math.max(1, Math.round(weapon.damage * scale * (headshot ? weapon.headMultiplier : 1)));
 }

@@ -1,12 +1,15 @@
 import * as THREE from 'three';
 import {
-  BODY, DT, FireControl, Interpolator, NET, Predictor, aimDirection, createPlayer, decodeServerMessage, eyeHeight,
-  parseMap, step, traceShot,
+  BODY, DT, FireControl, Interpolator, NET, Predictor, WEAPONS, aimDirection, createPlayer, decodeServerMessage,
+  eyeHeight, parseMap, parseServerMessage, pelletDirections, shotSeed, step, traceShot, weaponOf,
 } from '@hitscan/shared';
-import type { Input, PlayerState, RemotePlayer, ShotEvent, Snapshot, Target, Vec3 } from '@hitscan/shared';
+import type { Input, MatchInfo, MatchPhase, PlayerState, RemotePlayer, ShotEvent, Snapshot, Target, Vec3 } from '@hitscan/shared';
 import arena from '../../shared/maps/arena1.json';
+import { GameAudio } from './audio.ts';
 import { InputState } from './input.ts';
+import { LobbyUI, MatchHud } from './lobby.ts';
 import { NetClient, parseNetOptions } from './net.ts';
+import { ViewModel } from './viewmodel.ts';
 import { buildWorld } from './world.ts';
 
 const BASE_FOV = 75;
@@ -14,12 +17,17 @@ const SLIDE_FOV_KICK = 10;
 
 const map = parseMap(arena);
 const boxes = map.boxes;
-const options = parseNetOptions(window.location.search, window.location.hostname);
+const options = parseNetOptions(
+  window.location.search,
+  window.location.hostname,
+  import.meta.env.VITE_SERVER_URL as string | undefined, // set when the game page is built for deployment
+);
 
 // ---- renderer and scene
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.autoClear = false; // each frame clears once by hand, then draws the world and the gun on top
 document.body.prepend(renderer.domElement);
 
 const scene = new THREE.Scene();
@@ -29,11 +37,15 @@ buildWorld(scene, map);
 
 const camera = new THREE.PerspectiveCamera(BASE_FOV, window.innerWidth / window.innerHeight, 0.05, 200);
 camera.rotation.order = 'YXZ';
+const viewmodel = new ViewModel();
+viewmodel.resize(camera.aspect);
+let adsAmount = 0; // 0 = from the hip, 1 = fully aimed
 
 window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
+  viewmodel.resize(camera.aspect);
 });
 
 // ---- input, pointer lock and overlay
@@ -41,16 +53,31 @@ const input = new InputState(renderer.domElement);
 const overlay = document.getElementById('overlay') as HTMLElement;
 const hud = document.getElementById('hud') as HTMLElement;
 
-overlay.addEventListener('click', () => {
+const audio = new GameAudio();
+
+function lockPointer(): void {
+  audio.unlock(); // browsers allow sound only after a click, and this is called from one
   const canvas = renderer.domElement;
   // Ask for raw mouse movement (no Windows pointer acceleration or smoothing), which is
   // steadier for aiming. Browsers that don't support the option get the normal lock.
   const lock = canvas.requestPointerLock.bind(canvas) as (options?: { unadjustedMovement?: boolean }) => Promise<void> | void;
-  const result = lock({ unadjustedMovement: true });
-  if (result && typeof result.catch === 'function') result.catch(() => canvas.requestPointerLock());
-});
-document.addEventListener('pointerlockchange', () => {
-  overlay.style.display = document.pointerLockElement === renderer.domElement ? 'none' : 'flex';
+  try {
+    const result = lock({ unadjustedMovement: true });
+    if (result && typeof result.catch === 'function') result.catch(() => canvas.requestPointerLock());
+  } catch {
+    // Not allowed right now (no recent click): the pause screen stays up and a click will lock it.
+  }
+}
+
+overlay.addEventListener('click', lockPointer);
+const leaveButton = document.getElementById('leave') as HTMLButtonElement;
+const pauseVolume = document.getElementById('volume2') as HTMLInputElement;
+pauseVolume.value = String(Math.round(audio.volume * 100));
+pauseVolume.addEventListener('input', () => audio.setVolume(Number(pauseVolume.value) / 100));
+for (const control of [leaveButton, pauseVolume]) control.addEventListener('click', (e) => e.stopPropagation());
+document.addEventListener('pointerlockchange', () => updateScreens());
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'KeyM' && !(e.target instanceof HTMLInputElement)) audio.toggleMute();
 });
 
 // ---- local player (used offline, and as a placeholder while connecting)
@@ -67,15 +94,19 @@ let prev = spawn();
 let cur = prev;
 
 // ---- networking
-type Mode = 'connecting' | 'online' | 'offline' | 'disconnected';
+type Mode = 'connecting' | 'lobby' | 'joining' | 'online' | 'offline' | 'disconnected';
 let mode: Mode = options.offline ? 'offline' : 'connecting';
 let note = options.offline ? 'offline (?offline in the address)' : `connecting to ${options.url}`;
+let netOpen = false; // is the connection to the server up?
 let predictor: Predictor | null = null;
-const interp = new Interpolator(NET.interpDelay);
+let interp = new Interpolator(NET.interpDelay);
 const sentAt = new Map<number, number>(); // input number -> when it was sent, to measure the round trip
 let roundTripMs = 0;
 let snapshotCount = 0;
 let acc = 0;
+let matchPhase: MatchPhase = 'playing';
+const names = new Map<number, string>(); // player id -> nickname, for the current match
+let wasAlive = true;
 
 // ---- combat state
 let myId = 0;
@@ -95,9 +126,19 @@ const healthFill = el('healthfill');
 const killfeedEl = el('killfeed');
 const scoresEl = el('scores');
 const deadEl = el('dead');
+const scopeEl = el('scope');
+const crosshairEl = el('crosshair');
+const weaponsEl = el('weapons');
+let shownWeapon = -1;
+let offlineTicks = 0;
 let hitFlash = 0;
 let damageFlash = 0;
 const feed: Array<{ text: string; until: number }> = [];
+const stepTracks = new Map<number, { x: number; z: number; dist: number }>(); // footstep sounds for other players
+let myStepDist = 0;
+let lastWeaponHeard = 0;
+let wasSliding = false;
+let wasGrounded = true;
 
 const TRACER_SECONDS = 0.14;
 const tracers: Array<{ line: THREE.Line; born: number }> = [];
@@ -126,56 +167,165 @@ function updateTracers(nowMs: number): void {
   }
 }
 
-/** Our own shot, drawn the moment we fire instead of waiting a round trip for the server to echo it. */
-function fireLocal(state: PlayerState, aim: { yaw: number; pitch: number }): void {
+/**
+ * Our own shot, drawn the moment we fire instead of waiting a round trip for the server to echo it.
+ * The scatter comes from the same seeded function the server uses, so the rays are the same ones.
+ */
+function fireLocal(state: PlayerState, used: Input, seq: number): void {
+  const weapon = weaponOf(used.weapon);
   const eyePos: Vec3 = [state.x, state.y + eyeHeight(state), state.z];
-  const dir = aimDirection(aim.yaw, aim.pitch);
   const targets: Target[] = lastRemotes
     .filter((r) => r.alive)
     .map((r) => ({ id: r.id, x: r.x, y: r.y, z: r.z, sliding: r.sliding }));
-  const end = traceShot(eyePos, dir, boxes, targets).end;
+  const rays = pelletDirections(weapon, used.yaw, used.pitch, used.aim, shotSeed(seq, myId));
+  const right: Vec3 = [Math.cos(used.yaw), 0, -Math.sin(used.yaw)];
+  const aimDir = aimDirection(used.yaw, used.pitch);
   // Start the visible line at the gun, low and to the right, so it does not hide the crosshair.
-  const right: Vec3 = [Math.cos(aim.yaw), 0, -Math.sin(aim.yaw)];
+  const lower = 0.18 * (1 - adsAmount);
+  const side = 0.2 * (1 - adsAmount);
   const muzzle: Vec3 = [
-    eyePos[0] + right[0] * 0.2 + dir[0] * 0.6,
-    eyePos[1] - 0.18 + dir[1] * 0.6,
-    eyePos[2] + right[2] * 0.2 + dir[2] * 0.6,
+    eyePos[0] + right[0] * side + aimDir[0] * 0.6,
+    eyePos[1] - lower + aimDir[1] * 0.6,
+    eyePos[2] + right[2] * side + aimDir[2] * 0.6,
   ];
-  spawnTracer(muzzle, end, 0xfff1b0);
+  for (const dir of rays) spawnTracer(muzzle, traceShot(eyePos, dir, boxes, targets).end, 0xfff1b0);
+  audio.shot(used.weapon);
+  viewmodel.kick();
+  input.kick(weapon.recoil * (used.aim ? 0.6 : 1));
 }
 
 function name(id: number): string {
-  return id === myId ? 'You' : `Player ${id}`;
+  return id === myId ? 'You' : (names.get(id) ?? `Player ${id}`);
 }
 
 function onEvents(events: ShotEvent[]): void {
   const now = performance.now();
+  const heard = new Set<number>(); // a shotgun blast is many rays but one sound
   for (const e of events) {
-    if (e.shooter !== myId) spawnTracer(e.origin, e.end, 0xffc27a);
+    if (e.shooter !== myId) {
+      spawnTracer(e.origin, e.end, 0xffc27a);
+      if (!heard.has(e.shooter)) {
+        heard.add(e.shooter);
+        audio.shot(e.weapon, e.origin);
+      }
+    }
     if (e.shooter === myId && e.victim !== 0 && e.damage > 0) {
+      audio.hit(e.headshot, e.killed);
       hitFlash = 0.18;
       hitEl.style.setProperty('--c', e.killed ? '#ff4545' : e.headshot ? '#ffb02e' : '#ffffff');
     }
-    if (e.victim === myId && e.damage > 0) damageFlash = 0.7;
+    if (e.victim === myId && e.damage > 0) {
+      damageFlash = 0.7;
+      audio.damaged();
+    }
     if (e.killed) {
-      feed.push({ text: `${name(e.shooter)}  \u25B8  ${name(e.victim)}${e.headshot ? '  (head)' : ''}`, until: now + 5000 });
+      feed.push({
+        text: `${name(e.shooter)}  [${weaponOf(e.weapon).name}]  \u25B8  ${name(e.victim)}${e.headshot ? '  (head)' : ''}`,
+        until: now + 5000,
+      });
       if (feed.length > 6) feed.shift();
     }
   }
 }
 
+// ---- screens: the lobby, the "click to play" pause screen, or the game itself
+const lobbyUI = new LobbyUI(
+  {
+    onQuick: () => net?.sendText({ t: 'quick' }),
+    onCreate: (matchName, scoreLimit, timeLimit) => net?.sendText({ t: 'create', name: matchName, scoreLimit, timeLimit }),
+    onJoin: (id) => net?.sendText({ t: 'join', id }),
+    onOffline: () => goOffline('practising alone (no server)'),
+    onNameChange: (n) => net?.sendText({ t: 'hello', name: n }),
+    onVolume: (v) => {
+      audio.setVolume(v);
+      pauseVolume.value = String(Math.round(v * 100));
+    },
+  },
+  audio.volume,
+);
+lobbyUI.onJoin((id) => net?.sendText({ t: 'join', id }));
+const matchHud = new MatchHud();
+let endAt = 0; // wall-clock time the end-of-round screen counts down to
+
+function updateScreens(): void {
+  const showLobby = mode === 'connecting' || mode === 'lobby' || mode === 'disconnected';
+  const locked = document.pointerLockElement === renderer.domElement;
+  if (showLobby) lobbyUI.show();
+  else lobbyUI.hide();
+  overlay.style.display = !showLobby && !locked ? 'flex' : 'none';
+  lobbyUI.setConnected(netOpen && mode === 'lobby');
+}
+
+function setMode(next: Mode): void {
+  mode = next;
+  updateScreens();
+}
+
+/** Forget everything about the match we were in (or were joining). */
+function resetGameState(): void {
+  predictor = null;
+  interp = new Interpolator(NET.interpDelay);
+  sentAt.clear();
+  roundTripMs = 0;
+  fireControl.reset();
+  for (const [, m] of remoteMeshes) {
+    scene.remove(m);
+    disposeMesh(m);
+  }
+  remoteMeshes.clear();
+  for (const t of tracers) {
+    scene.remove(t.line);
+    t.line.geometry.dispose();
+    (t.line.material as THREE.Material).dispose();
+  }
+  tracers.length = 0;
+  stepTracks.clear();
+  names.clear();
+  scoreRows = [];
+  lastRemotes = [];
+  feed.length = 0;
+  health = 100;
+  alive = true;
+  wasAlive = true;
+  respawnTicks = 0;
+  kills = 0;
+  deaths = 0;
+  matchPhase = 'playing';
+  matchHud.hide();
+}
+
+function backToLobby(message: string, isError = false): void {
+  resetGameState();
+  if (document.pointerLockElement) document.exitPointerLock();
+  setMode(netOpen ? 'lobby' : 'disconnected');
+  lobbyUI.setStatus(message, isError);
+  if (netOpen) net?.sendText({ t: 'list' });
+}
+
 function goOffline(reason: string): void {
-  mode = 'offline';
+  resetGameState();
   note = reason;
   prev = cur = spawn();
   acc = 0;
+  setMode('offline');
+  lockPointer();
 }
+
+function leaveMatch(): void {
+  if (mode === 'offline') {
+    backToLobby(netOpen ? 'Pick a match.' : 'Not connected to a server.', !netOpen);
+    return;
+  }
+  if (netOpen) net?.sendText({ t: 'leave' });
+  backToLobby('Pick a match.');
+}
+leaveButton.addEventListener('click', leaveMatch);
 
 function onSnapshot(snap: Snapshot): void {
   if (!predictor) {
     predictor = new Predictor(boxes, snap.own);
-    mode = 'online';
     note = 'online';
+    setMode('online');
   } else {
     predictor.onSnapshot(snap);
   }
@@ -187,6 +337,9 @@ function onSnapshot(snap: Snapshot): void {
   snapshotCount++;
   health = snap.health;
   alive = snap.alive;
+  if (wasAlive && !alive) audio.died();
+  else if (!wasAlive && alive) audio.respawned();
+  wasAlive = alive;
   respawnTicks = snap.respawnTicks;
   kills = snap.kills;
   deaths = snap.deaths;
@@ -194,20 +347,89 @@ function onSnapshot(snap: Snapshot): void {
   interp.push(snap.tick * DT, snap.others, performance.now());
 }
 
+function onLobbyText(text: string): void {
+  const msg = parseServerMessage(text);
+  if (!msg) return;
+  switch (msg.t) {
+    case 'matches':
+      if (mode === 'lobby') lobbyUI.setMatches(msg.list, netOpen);
+      break;
+    case 'joined':
+      resetGameState();
+      matchPhase = msg.match.phase;
+      matchHud.setClock(msg.match.phase, msg.match.left, msg.match.scoreLimit);
+      note = `joined "${msg.match.name}", waiting for the world`;
+      setMode('joining');
+      lockPointer(); // works if the click that joined is still recent; otherwise the pause screen asks for a click
+      break;
+    case 'left':
+      if (mode === 'joining' || mode === 'online') backToLobby(msg.reason || 'You left the match.');
+      break;
+    case 'roster':
+      names.clear();
+      for (const p of msg.players) names.set(p.id, p.name);
+      break;
+    case 'clock':
+      if (mode !== 'joining' && mode !== 'online') break;
+      if (matchPhase === 'ended' && msg.phase === 'playing') {
+        matchHud.hideEnd();
+        fireControl.reset();
+        audio.roundStart();
+      }
+      matchPhase = msg.phase;
+      matchHud.setClock(msg.phase, msg.left, msg.scoreLimit);
+      break;
+    case 'ended': {
+      if (mode !== 'joining' && mode !== 'online') break;
+      matchPhase = 'ended';
+      const winnerName = msg.rows.find((r) => r.id === msg.winner)?.name ?? '';
+      endAt = performance.now() + msg.nextIn * 1000;
+      matchHud.showEnd(msg.rows, winnerName, myId, msg.nextIn);
+      audio.roundEnd(msg.winner === myId);
+      break;
+    }
+    case 'error':
+      lobbyUI.setStatus(msg.message, true);
+      if (mode === 'joining') setMode('lobby');
+      break;
+    case 'hello':
+      break;
+  }
+}
+
 const net: NetClient | null = options.offline
   ? null
   : new NetClient(options, {
       onOpen: () => {
-        note = `connected to ${options.url}, waiting for the world`;
-      },
-      onClose: () => {
-        if (mode === 'connecting') goOffline(`no server at ${options.url}: playing offline`);
-        else if (mode === 'online') {
-          mode = 'disconnected';
-          note = 'disconnected from the server (refresh the page to rejoin)';
+        netOpen = true;
+        const saved = (document.getElementById('nick') as HTMLInputElement).value;
+        net?.sendText({ t: 'hello', name: saved });
+        net?.sendText({ t: 'list' });
+        if (mode === 'connecting' || mode === 'disconnected') {
+          note = 'connected';
+          lobbyUI.setStatus('Connected. Pick a match or press Quick play.');
+          setMode('lobby');
         }
       },
+      onClose: () => {
+        const wasConnected = netOpen;
+        netOpen = false;
+        if (mode === 'offline') {
+          updateScreens();
+          return;
+        }
+        resetGameState();
+        if (document.pointerLockElement) document.exitPointerLock();
+        setMode('disconnected');
+        lobbyUI.setStatus(
+          wasConnected ? 'Lost the connection to the server. Refresh the page to reconnect.' : `Cannot reach the server at ${options.url}. You can practise alone.`,
+          true,
+        );
+        lobbyUI.setMatches([], false);
+      },
+      onText: onLobbyText,
       onMessage: (bytes) => {
+        if (mode !== 'joining' && mode !== 'online') return;
         const msg = decodeServerMessage(bytes);
         if (!msg) return;
         if (msg.kind === 'welcome') {
@@ -216,8 +438,7 @@ const net: NetClient | null = options.offline
           input.pitch = 0;
           if (msg.welcome.mapName !== map.name) note = `server map "${msg.welcome.mapName}" differs from "${map.name}"`;
         } else if (msg.kind === 'reject') {
-          goOffline('the server is full: playing offline');
-          net?.close();
+          backToLobby('That match is full.', true);
         } else if (msg.kind === 'events') {
           onEvents(msg.events);
         } else {
@@ -225,6 +446,12 @@ const net: NetClient | null = options.offline
         }
       },
     });
+
+// Keep the match list fresh while the lobby is open.
+setInterval(() => {
+  if (netOpen && mode === 'lobby') net?.sendText({ t: 'list' });
+}, 2000);
+updateScreens();
 
 // ---- other players: one box each, facing the way they face
 const remoteMeshes = new Map<number, THREE.Mesh>();
@@ -314,7 +541,8 @@ function frame(now: number): void {
       const raw = input.sample();
       prev = cur;
       cur = step(cur, raw, boxes);
-      if (fireControl.tick(raw.fire, true)) fireLocal(cur, raw);
+      offlineTicks++;
+      if (fireControl.tick(raw.fire, true, raw.weapon)) fireLocal(cur, raw, offlineTicks);
       acc -= DT;
     }
   } else if (mode === 'online' && predictor && net) {
@@ -326,7 +554,7 @@ function frame(now: number): void {
       raw.viewMs = Math.round(interp.sample(performance.now()).renderTime * 1000);
       const packet = predictor.tick(raw);
       const used = predictor.lastInput;
-      if (used && fireControl.tick(used.fire, predictor.alive)) fireLocal(predictor.cur, used);
+      if (used && fireControl.tick(used.fire && matchPhase === 'playing', predictor.alive, used.weapon)) fireLocal(predictor.cur, used, predictor.lastSeq);
       sentAt.set(predictor.lastSeq, performance.now());
       if (sentAt.size > 300) sentAt.delete(sentAt.keys().next().value as number);
       net.send(packet);
@@ -353,13 +581,74 @@ function frame(now: number): void {
   camera.position.set(x, y + eye, z);
   camera.rotation.set(input.pitch, input.yaw, 0);
 
-  const targetFov = BASE_FOV + (drawCur.sliding ? SLIDE_FOV_KICK : 0);
-  fov += (targetFov - fov) * (1 - Math.exp(-frameDt * 10));
+  // Sound: listener follows the camera; footsteps, landing, sliding and weapon switches for us and others.
+  if (mode === 'online' || mode === 'offline') {
+    audio.updateListener([x, y + eye, z], aimDirection(input.yaw, input.pitch));
+    if (input.weapon !== lastWeaponHeard) {
+      lastWeaponHeard = input.weapon;
+      audio.switched();
+    }
+    if (drawCur.sliding && !wasSliding) audio.slid();
+    if (drawCur.grounded && !wasGrounded && drawCur.vy < -5) audio.landed();
+    if (drawCur.grounded && !drawCur.sliding && (mode === 'offline' || alive)) {
+      myStepDist += Math.hypot(drawCur.vx, drawCur.vz) * frameDt;
+      if (myStepDist > 2.2) {
+        myStepDist = 0;
+        audio.step();
+      }
+    }
+    wasSliding = drawCur.sliding;
+    wasGrounded = drawCur.grounded;
+    for (const r of lastRemotes) {
+      const tr = stepTracks.get(r.id) ?? { x: r.x, z: r.z, dist: 0 };
+      tr.dist += Math.hypot(r.x - tr.x, r.z - tr.z);
+      tr.x = r.x;
+      tr.z = r.z;
+      if (tr.dist > 2.4 && r.alive && !r.sliding && Math.hypot(r.x - x, r.z - z) < 25) {
+        tr.dist = 0;
+        audio.step([r.x, r.y, r.z]);
+      } else if (tr.dist > 2.4) tr.dist = 0;
+      stepTracks.set(r.id, tr);
+    }
+  }
+
+  // Aiming down sights: zoom in, slow the mouse to match, and hold the gun at the centre.
+  const weaponNow = weaponOf(input.weapon);
+  const wantAim = input.aimHeld && (mode === 'offline' || (mode === 'online' && alive));
+  adsAmount += ((wantAim ? 1 : 0) - adsAmount) * (1 - Math.exp(-frameDt * 16));
+  if (Math.abs((wantAim ? 1 : 0) - adsAmount) < 0.002) adsAmount = wantAim ? 1 : 0;
+  const targetFov = (BASE_FOV + (drawCur.sliding ? SLIDE_FOV_KICK : 0)) * (1 - adsAmount) + weaponNow.adsFov * adsAmount;
+  fov += (targetFov - fov) * (1 - Math.exp(-frameDt * 18));
   camera.fov = fov;
   camera.updateProjectionMatrix();
+  input.sensitivityScale = Math.tan((fov * Math.PI) / 360) / Math.tan((BASE_FOV * Math.PI) / 360);
+
+  viewmodel.setWeapon(input.weapon);
+  const showGun = mode === 'offline' || (mode === 'online' && alive);
+  viewmodel.update(frameDt, adsAmount, Math.hypot(drawCur.vx, drawCur.vz), drawCur.grounded, showGun);
+  const scoped = weaponNow.scope && adsAmount > 0.9;
+  scopeEl.style.display = scoped ? 'block' : 'none';
+  crosshairEl.style.display = scoped ? 'none' : 'block';
+  crosshairEl.style.opacity = String(1 - adsAmount * 0.6);
+
+  if (shownWeapon !== input.weapon) {
+    shownWeapon = input.weapon;
+    weaponsEl.replaceChildren(
+      ...WEAPONS.map((w, i) => {
+        const slot = document.createElement('div');
+        slot.className = i === input.weapon ? 'slot on' : 'slot';
+        const key = document.createElement('b');
+        key.textContent = String(i + 1);
+        slot.append(key, w.name);
+        return slot;
+      }),
+    );
+  }
 
   updateTracers(now);
+  renderer.clear();
   renderer.render(scene, camera);
+  viewmodel.render(renderer);
 
   // Combat HUD
   hitFlash = Math.max(0, hitFlash - frameDt);
@@ -370,6 +659,7 @@ function frame(now: number): void {
   hudTimer -= frameDt;
   if (hudTimer <= 0) {
     hudTimer = 0.1;
+    if (matchPhase === 'ended' && mode === 'online') matchHud.updateEndCountdown((endAt - performance.now()) / 1000);
     const speed = Math.hypot(drawCur.vx, drawCur.vz);
     const slide = drawCur.sliding ? 'SLIDING' : drawCur.slideCooldown > 0 ? `cooldown ${drawCur.slideCooldown.toFixed(1)}s` : 'ready';
     let netText: string;

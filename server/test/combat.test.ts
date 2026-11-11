@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { COMBAT, DT, TICK_RATE, decodeServerMessage, encodeInputPacket, quantizeInput } from '@hitscan/shared';
+import { COMBAT, DT, TICK_RATE, WEAPONS, decodeServerMessage, encodeInputPacket, pelletDamage, quantizeInput } from '@hitscan/shared';
 import type { GameMap, Input, ServerMessage, ShotEvent, Snapshot } from '@hitscan/shared';
 import { GameServer } from '../src/game.ts';
 import type { Connection } from '../src/game.ts';
@@ -79,15 +79,15 @@ test('a shot hits the player in front: head shots do double, body shots the base
   assert.equal(head.shooter, r.a.id);
   assert.equal(head.victim, r.b.id);
   assert.equal(head.headshot, true);
-  assert.equal(head.damage, COMBAT.damage * COMBAT.headMultiplier);
+  assert.equal(head.damage, pelletDamage(WEAPONS[0], 10, true));
   assert.equal(r.info('b').health, COMBAT.maxHealth - head.damage);
 
-  r.run(COMBAT.fireIntervalTicks); // wait out the fire rate
+  r.run(WEAPONS[0].intervalTicks); // wait out the fire rate
   r.run(1, { fire: true, pitch: BODY_PITCH });
   r.run(5);
   const body = r.a.conn.events[1];
   assert.equal(body.headshot, false);
-  assert.equal(body.damage, COMBAT.damage);
+  assert.equal(body.damage, pelletDamage(WEAPONS[0], 10, false));
   assert.equal(r.info('a').health, COMBAT.maxHealth, 'the shooter is not hurt');
 });
 
@@ -103,14 +103,20 @@ test('every player hears about every shot, so everyone can draw the tracer', () 
   assert.ok(Math.abs(e.end[2] - -9.65) < 1e-3, 'and ends on the near face of the body');
 });
 
-test('holding the trigger fires at the weapon rate, not once per input', () => {
+test('holding the trigger fires at the gun rate, not once per input; a pistol needs a click per shot', () => {
   const r = new Rig();
   warm(r);
+  r.run(WEAPONS[1].switchTicks + 3, { weapon: 1 }); // SMG out and ready
   const before = r.a.conn.events.length;
-  r.run(60, { fire: true, pitch: -1.2 }); // aimed at the floor, so nobody dies
-  r.run(5);
-  const shots = r.a.conn.events.length - before;
-  assert.equal(shots, Math.ceil(60 / COMBAT.fireIntervalTicks));
+  r.run(60, { weapon: 1, fire: true, pitch: -1.2 }); // aimed at the floor, so nobody dies
+  r.run(5, { weapon: 1 });
+  assert.equal(r.a.conn.events.length - before, Math.ceil(60 / WEAPONS[1].intervalTicks));
+
+  const p = new Rig();
+  warm(p);
+  p.run(60, { fire: true, pitch: -1.2 });
+  p.run(5);
+  assert.equal(p.a.conn.events.length, 1, 'holding the pistol trigger gives one shot');
 });
 
 test('walls stop shots', () => {
@@ -125,10 +131,12 @@ test('walls stop shots', () => {
   assert.equal(r.info('b').health, COMBAT.maxHealth);
 });
 
-test('four body shots kill: score, death, no movement while dead, no shooting while dead, then a respawn with a shield', () => {
+test('four rifle body shots kill: score, death, no movement while dead, no shooting while dead, then a respawn with a shield', () => {
+  const rifle = WEAPONS[3];
   const r = new Rig();
   warm(r);
-  r.run(COMBAT.fireIntervalTicks * 3 + 1, { fire: true, pitch: BODY_PITCH });
+  r.run(rifle.switchTicks + 3, { weapon: 3 });
+  r.run(rifle.intervalTicks * 3 + 1, { weapon: 3, fire: true, pitch: BODY_PITCH });
   r.run(3);
   assert.equal(r.info('b').alive, false);
   assert.equal(r.info('b').health, 0);
@@ -153,23 +161,24 @@ test('four body shots kill: score, death, no movement while dead, no shooting wh
   assert.equal(r.info('b').health, COMBAT.maxHealth);
 
   // The shield: shots right after a respawn do no damage...
-  r.run(5, { fire: true, pitch: BODY_PITCH });
+  r.run(5, { weapon: 3, fire: true, pitch: BODY_PITCH });
   assert.equal(r.info('b').health, COMBAT.maxHealth, 'spawn shield');
   // ...and once it wears off they do.
-  r.run(COMBAT.spawnShieldTicks, { fire: true, pitch: BODY_PITCH });
+  r.run(COMBAT.spawnShieldTicks, { weapon: 3, fire: true, pitch: BODY_PITCH });
   assert.ok(r.info('b').health < COMBAT.maxHealth);
 });
 
 test('fire cooldown counts inputs: a player cannot shoot faster by sending packets faster', () => {
   const r = new Rig();
   warm(r);
+  r.run(WEAPONS[3].switchTicks + 3, { weapon: 3 });
   const before = r.a.conn.events.length;
   for (let i = 0; i < 6; i++) {
     // Six inputs per tick: the server only applies what the budget allows.
-    for (let k = 0; k < 6; k++) r.server.onMessage(r.a.id, encodeInputPacket([{ seq: ++r.a.seq, input: quantizeInput({ ...IDLE, fire: true, pitch: -1.2 }) }]));
-    r.tick({ pitch: -1.2 });
+    for (let k = 0; k < 6; k++) r.server.onMessage(r.a.id, encodeInputPacket([{ seq: ++r.a.seq, input: quantizeInput({ ...IDLE, weapon: 3, fire: true, pitch: -1.2 }) }]));
+    r.tick({ weapon: 3, pitch: -1.2 });
   }
-  r.run(5);
+  r.run(5, { weapon: 3 });
   assert.ok(r.a.conn.events.length - before <= 4, `fired ${r.a.conn.events.length - before} shots in about 0.1 s`);
 });
 

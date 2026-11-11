@@ -29,12 +29,13 @@ function duel(seed: number, link: { latencyMs: number; jitterMs: number; loss: n
     const view = a.interp.sample(world.clock.now());
     const target = view.players.find((p) => p.id === b.id);
     const me = a.predictor?.cur;
-    if (!target || !me || tick < 130) return IDLE; // let the spawn shields wear off first
+    if (!target || !me || tick < 130) return { ...IDLE, weapon: 3 }; // rifle out, and let the spawn shields wear off first
     const dx = target.x - me.x;
     const dz = target.z - me.z;
     const dy = target.y + BODY.standHeight * 0.5 - (me.y + BODY.standEye);
     return {
       ...IDLE,
+      weapon: 3,
       yaw: Math.atan2(-dx, -dz),
       pitch: Math.atan2(dy, Math.hypot(dx, dz)),
       fire: true,

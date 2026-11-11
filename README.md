@@ -4,9 +4,9 @@ Hitscan is a multiplayer 3D arena shooter that runs in the browser: TypeScript, 
 authoritative Node server with client-side prediction, interpolation and a built-in network simulator.
 See the roadmap doc for the full plan.
 
-**Status: Stage 3** - movement, slide, the first map, multiplayer, and shooting: you can shoot other
-players, with hits judged by the server and compensated for lag. There is one gun for now; the five-gun
-selection is Stage 4.
+**Status: Stage 5** - movement, slide, the first map, multiplayer, five guns with aim down sights, lag-compensated
+hits, a lobby (nickname, open matches, create, join, quick play), timed rounds with a scoreboard and automatic
+next round, synthesized sound, abuse limits, and deployment files (see `DEPLOY.md`). Next: more maps (Stage 6).
 
 ## Setup (Windows PowerShell)
 
@@ -25,7 +25,9 @@ npm run server    # the game server, listens on ws://localhost:8787
 npm run dev       # the game; open the address it prints in Chrome (open it in two tabs to see each other)
 ```
 
-If the server isn't running the game falls back to playing alone (the same as Stage 1).
+The game opens on a lobby: enter a nickname, then press Quick play, create a match, or join one from the list.
+If the server isn't running the lobby says so and offers "Practise alone". The first player to the score limit,
+or the best score when the timer runs out, wins; the scoreboard shows for a few seconds, then a new round starts.
 The first time the server starts, Windows may ask to allow Node through the firewall: allow it.
 
 Other commands:
@@ -47,6 +49,8 @@ Add these to the game's address to simulate a bad connection, in both directions
 | `server` | `&server=ws://192.168.1.20:8787` | Connect to a server on another machine |
 | `offline` | `?offline` | Skip the server and play alone |
 
+A deployed build gets its server address from `VITE_SERVER_URL` at build time (`?server=` overrides it).
+
 For example `http://localhost:5173/?lag=100&jitter=20&loss=5`. The on-screen readout shows the round
 trip, how many snapshots arrive per second, how many of your inputs are still unacknowledged, and how far the
 last server correction moved you.
@@ -60,10 +64,13 @@ last server correction moved you.
 | Space | Jump |
 | Shift | Sprint |
 | C | Slide: sprint first, then tap C. Jumping out of a slide keeps your speed |
-| Left click | Shoot (hold for automatic fire) |
+| Left click | Shoot (hold for automatic guns; click per shot for the others) |
+| Right click | Aim down sights (hold) |
+| 1 2 3 4 5 / mouse wheel | Pistol, SMG, shotgun, rifle, sniper |
 | Tab | Hold to show the scoreboard |
+| M | Mute / unmute (volume sliders are in the lobby and the pause screen) |
 | R | Respawn (offline only) |
-| Esc | Release the mouse |
+| Esc | Release the mouse (the pause screen has Leave match) |
 
 The slide needs a fast run-up and then has a cooldown. The tunnel at the south end of the map
 is only slide-high: slide in, and you stay crouched until you are clear of the ceiling.
@@ -86,6 +93,24 @@ is only slide-high: slide in, and you stay crouched until you are clear of the c
   allowance), so a client can't run faster by sending inputs faster; oversized, truncated or garbage packets are
   ignored; and a connection that stops sending valid inputs for five seconds is dropped.
 
+### The guns
+
+| Key | Gun | Damage | Fire rate | Notes |
+|---|---|---|---|---|
+| 1 | Pistol | 22 | 6/s, click per shot | Accurate, falls off slowly |
+| 2 | SMG | 12 | 15/s, automatic | Wide spread from the hip, strong when aimed |
+| 3 | Shotgun | 8 pellets x 12 | 1.25/s, click per shot | Devastating up close, weak beyond 25 m |
+| 4 | Rifle | 28 | 8.6/s, automatic | The all-rounder |
+| 5 | Sniper | 90 | 0.77/s, click per shot | One shot to the head, scope when aimed, wild from the hip |
+
+Head shots multiply damage (double for most guns, 1.5x for the SMG and shotgun). Damage falls off with distance
+(per gun). Aiming down sights narrows the random spread, zooms in, and slows the mouse to match. Taking a gun
+out takes a moment, and swapping can't be used to skip a gun's own reload time. All the numbers are in
+`WEAPONS` in `shared/src/config.ts`.
+
+The scatter is seeded from the input number and your player id, so the server and your own screen compute
+exactly the same rays. Your tracers are the ones the server will really fire.
+
 ### Shooting and lag compensation
 
 - **Hitscan:** a shot is an instant ray from your eye along where you are looking. It stops at the first wall or
@@ -93,8 +118,8 @@ is only slide-high: slide in, and you stay crouched until you are clear of the c
 - **The server decides.** The client sends only "trigger held" along with the look direction. The server finds the
   ray, the hit, the damage and the kill. Health, deaths and respawns (3 seconds, then 1.5 seconds of spawn shield)
   all live on the server.
-- **Fire rate is part of the input stream.** The rule "one shot per 12 inputs while held" is shared code, so your
-  client knows exactly which of its inputs the server will count as shots. Your tracer appears the instant you click, and
+- **Fire rate is part of the input stream.** The trigger rule (fire rate, click-per-shot, gun swap delay) is shared
+  code that counts inputs, so your client knows exactly which of its inputs the server will count as shots. Your tracer appears the instant you click, and
   the hit marker follows when the server confirms it.
 - **Lag compensation.** What you aim at on your screen is where players were about 100 ms plus your latency ago. Each
   input carries the server time your screen was showing. The server keeps the last 40 ticks of every player's position
@@ -120,6 +145,8 @@ damage, fire rate, health, respawn time and the rewind limit are under `COMBAT`.
 - **Full client + server runs on a virtual clock** with a simulated network: a perfect network gives zero
   corrections; 100 ms latency, 20 ms jitter and 5% loss gives rare, small ones; 40% loss still converges; other
   players are drawn smoothly and without extrapolation.
+- **Weapons:** the gun table, falloff, the seeded spread (stays inside its cone, fills it evenly, repeats from the
+  same seed), the trigger rule for each gun type, shotgun pellets, one-shot sniper head shots, and aiming tightening the spread.
 - **Shooting:** ray geometry, walls blocking shots, head shots, fire rate, kills and respawns, the spawn shield, and a
   dead player being unable to move or shoot.
 - **Lag compensation:** a moving target is hit when the shooter claims the right moment and missed when the claim is
@@ -140,6 +167,7 @@ damage, fire rate, health, respawn time and the rewind limit are under `COMBAT`.
 | `shared/src/interp.ts` | Interpolation of other players |
 | `shared/src/hitscan.ts` | Shot geometry: the aim direction, ray against walls and player boxes |
 | `shared/src/combat.ts` | The trigger rule shared by client and server |
+| `client/src/viewmodel.ts` | The gun in your hands (blocky models, sway, recoil, muzzle flash) |
 | `shared/src/netsim.ts` | Network simulator (delay, jitter, loss) and the virtual clock used by tests |
 | `shared/maps/arena1.json` | The first map (boxes + spawn points) |
 | `server/src/game.ts` | The game server logic, with no networking in it |
@@ -147,3 +175,16 @@ damage, fire rate, health, respawn time and the rewind limit are under `COMBAT`.
 | `server/src/loop.ts` | The fixed-rate tick loop |
 | `client/src/` | Three.js renderer, input handling, networking, main loop |
 | `shared/test/`, `server/test/` | Tests |
+
+## Server settings and limits
+
+Environment variables for `npm run server`: `PORT`, `ALLOWED_ORIGINS`, `MAX_MATCHES`, `MAX_PER_IP`, `TRUST_PROXY`.
+Per-connection message rate caps, a 1 KB message limit, nickname cleaning, a per-address connection cap and
+lobby idle timeouts are built in. `GET /health` is available for uptime checks. Details and hosting steps are in
+`DEPLOY.md`.
+
+## Sound
+
+All sound is synthesized in the browser with the Web Audio API (no audio files): per-gun shots, hit and kill
+ticks, footsteps, landing, slide, round start and end. Other players' sounds are positional. Browsers only
+allow sound after a click, so it starts when you click to play.

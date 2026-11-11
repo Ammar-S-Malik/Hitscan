@@ -4,6 +4,7 @@
  *
  * Client -> server
  *   input packet:  u8 type(1) | u8 count | count x { u32 seq, i8 forward, i8 strafe, f32 yaw, f32 pitch, u8 flags, u32 viewMs }
+ *                  flags: 1 jump, 2 sprint, 4 slide, 8 fire, 16 aim, bits 5-7 the weapon index
  * Server -> client
  *   welcome:   u8 type(16) | u16 playerId | u8 tickRate | u8 snapshotEvery | u32 tick | f32 yaw | u8 nameLen | name
  *   snapshot:  u8 type(17) | u32 tick | u32 ack | 8 x f64 own state | u8 flags | u8 health | u8 respawnTicks |
@@ -14,7 +15,7 @@
  * The client's own state is sent as f64 so that after a snapshot the client holds exactly the state
  * the server holds. Other players only need to be drawn, so they use f32.
  */
-import { NET } from './config.ts';
+import { NET, WEAPON_COUNT } from './config.ts';
 import type { Vec3 } from './map.ts';
 import type { Input, PlayerState } from './types.ts';
 
@@ -67,6 +68,7 @@ export interface ShotEvent {
   headshot: boolean;
   killed: boolean;
   damage: number;
+  weapon: number;
   origin: Vec3;
   end: Vec3;
 }
@@ -105,8 +107,14 @@ export function quantizeInput(i: Input): Input {
     slide: Boolean(i.slide),
     pitch: quantPitch(i.pitch),
     fire: Boolean(i.fire),
+    weapon: quantWeapon(i.weapon),
+    aim: Boolean(i.aim),
     viewMs: quantViewMs(i.viewMs),
   };
+}
+
+function quantWeapon(v: number): number {
+  return Number.isInteger(v) && v >= 0 && v < WEAPON_COUNT ? v : 0;
 }
 
 function quantPitch(v: number): number {
@@ -134,7 +142,11 @@ export function encodeInputPacket(inputs: readonly SeqInput[]): Uint8Array {
     v.setInt8(o + 5, quantAxis(input.strafe));
     v.setFloat32(o + 6, input.yaw, true);
     v.setFloat32(o + 10, quantPitch(input.pitch), true);
-    v.setUint8(o + 14, (input.jump ? 1 : 0) | (input.sprint ? 2 : 0) | (input.slide ? 4 : 0) | (input.fire ? 8 : 0));
+    v.setUint8(
+      o + 14,
+      (input.jump ? 1 : 0) | (input.sprint ? 2 : 0) | (input.slide ? 4 : 0) | (input.fire ? 8 : 0) |
+        (input.aim ? 16 : 0) | (quantWeapon(input.weapon) << 5),
+    );
     v.setUint32(o + 15, quantViewMs(input.viewMs), true);
     o += INPUT_BYTES;
   }
@@ -167,6 +179,8 @@ export function decodeInputPacket(bytes: Uint8Array): SeqInput[] | null {
         slide: (flags & 4) !== 0,
         pitch: Number.isFinite(pitch) ? Math.max(-MAX_PITCH, Math.min(MAX_PITCH, pitch)) : 0,
         fire: (flags & 8) !== 0,
+        aim: (flags & 16) !== 0,
+        weapon: quantWeapon(flags >> 5),
         viewMs: v.getUint32(o + 15, true),
       },
     });
@@ -199,7 +213,7 @@ export function encodeReject(reason: number): Uint8Array {
 
 const OWN_BYTES = 8 * 8 + 1 + 1 + 1 + 2 + 2;
 const OTHER_BYTES = 2 + 4 * 4 + 1 + 2 + 2;
-const EVENT_BYTES = 2 + 2 + 1 + 1 + 6 * 4;
+const EVENT_BYTES = 2 + 2 + 1 + 1 + 1 + 6 * 4;
 
 export function encodeSnapshot(s: Snapshot): Uint8Array {
   const n = Math.min(s.others.length, 255);
@@ -260,9 +274,10 @@ export function encodeEvents(events: readonly ShotEvent[]): Uint8Array {
     v.setUint16(o + 2, e.victim, true);
     buf[o + 4] = (e.headshot ? 1 : 0) | (e.killed ? 2 : 0);
     buf[o + 5] = clampByte(e.damage);
+    buf[o + 6] = quantWeapon(e.weapon);
     for (let k = 0; k < 3; k++) {
-      v.setFloat32(o + 6 + k * 4, e.origin[k], true);
-      v.setFloat32(o + 18 + k * 4, e.end[k], true);
+      v.setFloat32(o + 7 + k * 4, e.origin[k], true);
+      v.setFloat32(o + 19 + k * 4, e.end[k], true);
     }
     o += EVENT_BYTES;
   }
@@ -356,8 +371,8 @@ export function decodeServerMessage(bytes: Uint8Array): ServerMessage | null {
           const origin: Vec3 = [0, 0, 0];
           const end: Vec3 = [0, 0, 0];
           for (let k = 0; k < 3; k++) {
-            origin[k] = v.getFloat32(o + 6 + k * 4, true);
-            end[k] = v.getFloat32(o + 18 + k * 4, true);
+            origin[k] = v.getFloat32(o + 7 + k * 4, true);
+            end[k] = v.getFloat32(o + 19 + k * 4, true);
           }
           if (!origin.every(Number.isFinite) || !end.every(Number.isFinite)) return null;
           events.push({
@@ -366,6 +381,7 @@ export function decodeServerMessage(bytes: Uint8Array): ServerMessage | null {
             headshot: (bytes[o + 4] & 1) !== 0,
             killed: (bytes[o + 4] & 2) !== 0,
             damage: bytes[o + 5],
+            weapon: quantWeapon(bytes[o + 6]),
             origin,
             end,
           });
