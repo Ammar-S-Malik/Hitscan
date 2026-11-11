@@ -88,7 +88,7 @@ last server correction moved you.
 | Right click | Aim down sights (hold) |
 | 1 / 2 / mouse wheel | Your primary gun / your pistol (see Classes) |
 | Tab | Hold to show the scoreboard |
-| M | Mute / unmute (volume sliders are in the lobby and the pause screen) |
+| M | Mute / unmute (volume is under Settings, in the main menu and the pause screen) |
 | R | Reload (also happens by itself when a magazine runs dry) |
 | T | Respawn (free roam only) |
 | Esc | Release the mouse. The pause screen has Leave match, volume, mouse sensitivity, field of view and toggles for the crosshair, mini-map and debug readout (saved in your browser) |
