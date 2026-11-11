@@ -16,6 +16,7 @@ import type { VsAiConfig } from './lobby.ts';
 import { NetClient, parseNetOptions } from './net.ts';
 import { LocalGame } from '../../server/src/local.ts';
 import { ViewModel } from './viewmodel.ts';
+import { reloadCues } from './reloadpose.ts';
 import { buildWorld, disposeWorld } from './world.ts';
 import type { World } from './world.ts';
 
@@ -201,6 +202,11 @@ const scopeEl = el('scope');
 const crosshairEl = el('crosshair');
 const vignetteEl = el('vignette');
 const weaponsEl = el('weapons');
+const ammoEl = el('ammo');
+const ammoNowEl = el('ammoNow');
+const ammoMaxEl = el('ammoMax');
+const reloadFillEl = el('reloadbar').firstElementChild as HTMLElement;
+let cueProgress = -1; // how far through the reload the sound cues have been played
 let shownWeapon = -1;
 let offlineTicks = 0;
 let hitFlash = 0;
@@ -480,7 +486,10 @@ function onSnapshot(snap: Snapshot): void {
   health = snap.health;
   alive = snap.alive;
   if (wasAlive && !alive) audio.died();
-  else if (!wasAlive && alive) audio.respawned();
+  else if (!wasAlive && alive) {
+    audio.respawned();
+    fireControl.reset(); // a fresh life starts with full magazines, as on the server
+  }
   wasAlive = alive;
   respawnTicks = snap.respawnTicks;
   kills = snap.kills;
@@ -709,6 +718,7 @@ function frame(now: number): void {
     if (respawnPressed || cur.y < -30) {
       prev = cur = spawn();
       acc = 0;
+      fireControl.reset();
     }
     acc += frameDt;
     while (acc >= DT) {
@@ -716,7 +726,7 @@ function frame(now: number): void {
       prev = cur;
       cur = step(cur, raw, boxes);
       offlineTicks++;
-      if (fireControl.tick(raw.fire, true, raw.weapon)) fireLocal(cur, raw, offlineTicks);
+      if (fireControl.tick(raw.fire, true, raw.weapon, raw.reload)) fireLocal(cur, raw, offlineTicks);
       acc -= DT;
     }
   } else if (mode === 'online' && predictor && (local || net)) {
@@ -728,7 +738,7 @@ function frame(now: number): void {
       raw.viewMs = Math.round(interp.sample(viewClock()).renderTime * 1000);
       const packet = predictor.tick(raw);
       const used = predictor.lastInput;
-      if (used && fireControl.tick(used.fire && matchPhase === 'playing', predictor.alive, used.weapon)) fireLocal(predictor.cur, used, predictor.lastSeq);
+      if (used && fireControl.tick(used.fire && matchPhase === 'playing', predictor.alive, used.weapon, used.reload)) fireLocal(predictor.cur, used, predictor.lastSeq);
       sentAt.set(predictor.lastSeq, performance.now());
       if (sentAt.size > 300) sentAt.delete(sentAt.keys().next().value as number);
       (local ?? net)?.send(packet);
@@ -814,7 +824,20 @@ function frame(now: number): void {
 
   viewmodel.setWeapon(input.weapon);
   const showGun = mode === 'offline' || (mode === 'online' && alive);
-  viewmodel.update(frameDt, adsAmount, Math.hypot(drawCur.vx, drawCur.vz), drawCur.grounded, showGun);
+  const wDef = WEAPONS[input.weapon];
+  const reloadProgress = fireControl.reloading ? 1 - fireControl.reloadLeft / wDef.reloadTicks : -1;
+  viewmodel.update(frameDt, adsAmount, Math.hypot(drawCur.vx, drawCur.vz), drawCur.grounded, showGun, reloadProgress);
+  if (reloadProgress < 0) cueProgress = -1;
+  else {
+    if (cueProgress < 0) cueProgress = Math.max(0, reloadProgress - 0.001);
+    if (!frozen) for (const c of reloadCues(input.weapon)) if (c.at > cueProgress && c.at <= reloadProgress) audio.reloadCue(c.kind);
+    cueProgress = reloadProgress;
+  }
+  ammoNowEl.textContent = String(fireControl.ammo);
+  ammoMaxEl.textContent = `/ ${wDef.magSize}`;
+  ammoEl.className = fireControl.reloading ? 'reloading' : fireControl.ammo <= Math.ceil(wDef.magSize * 0.25) ? 'low' : '';
+  reloadFillEl.style.width = `${Math.max(0, reloadProgress) * 100}%`;
+  ammoEl.style.display = showGun ? '' : 'none';
   const scoped = weaponNow.scope && adsAmount > 0.9;
   scopeEl.style.display = scoped ? 'block' : 'none';
   crosshairEl.style.display = scoped || !settings.values.crosshair ? 'none' : 'block';

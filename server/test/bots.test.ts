@@ -145,7 +145,7 @@ test('a class may fire only its primary gun and the pistol; anything else is pla
     for (let i = 0; i < 90; i++) {
       seq++;
       const fire = i % 2 === 0; // fresh clicks, so semi-automatic guns can fire
-      g.send(encodeInputPacket([{ seq, input: { forward: 0, strafe: 0, yaw: 0, jump: false, sprint: false, slide: false, pitch: 0, fire, weapon, aim: false, viewMs: 0 } }]));
+      g.send(encodeInputPacket([{ seq, input: { forward: 0, strafe: 0, yaw: 0, jump: false, sprint: false, slide: false, pitch: 0, fire, weapon, aim: false, reload: false, viewMs: 0 } }]));
       g.tick();
     }
     return [...new Set(shots)];
@@ -161,4 +161,25 @@ test('the lobby accepts a class message only for a real primary gun', () => {
   assert.equal(parseClientMessage('{"t":"class","primary":0}'), null, 'the pistol is not a class');
   assert.equal(parseClientMessage('{"t":"class","primary":9}'), null);
   assert.equal(parseClientMessage('{"t":"class","primary":"3"}'), null);
+});
+
+test('the server enforces magazines: holding the trigger with the rifle fires a magazine, then waits out the reload', () => {
+  let shots = 0;
+  const g = new LocalGame(
+    { map: maps[0], difficulty: 'easy', bots: 0, scoreLimit: 99, timeLimit: 600, playerName: 'Tester', primary: 3, seed: 1 },
+    {
+      onBinary: (bytes) => {
+        const m = decodeServerMessage(bytes);
+        if (m && m.kind === 'events') shots += m.events.length;
+      },
+      onText: () => undefined,
+    },
+  );
+  g.start();
+  for (let i = 1; i <= 600; i++) {
+    g.send(encodeInputPacket([{ seq: i, input: { forward: 0, strafe: 0, yaw: 0, jump: false, sprint: false, slide: false, pitch: 0, fire: true, weapon: 3, aim: false, reload: false, viewMs: 0 } }]));
+    g.tick();
+  }
+  // Ten seconds of holding the trigger: about 85 rounds with no reloads, about 51 with them.
+  assert.ok(shots > 40 && shots < 62, `fired ${shots} rounds in 10 s`);
 });

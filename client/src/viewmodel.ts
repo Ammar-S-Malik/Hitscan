@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { WEAPONS } from '@hitscan/shared';
 import { GUNS, buildGun } from './guns.ts';
+import type { GunModel } from './guns.ts';
+import { NEUTRAL, reloadPose } from './reloadpose.ts';
 
 /**
  * The gun you hold, drawn in its own small scene on top of the world so it never sinks into walls.
@@ -30,6 +32,8 @@ export class ViewModel {
   private guns: THREE.Group[] = [];
   private hands: THREE.Group[][] = [];
   private flashes: THREE.Mesh[] = [];
+  private roles: GunModel['roles'][] = [];
+  private shells: THREE.Mesh[] = [];
   private current = 0;
   private kickBack = 0; // how far the gun is thrown back by the last shots
   private flashTime = 0;
@@ -45,9 +49,17 @@ export class ViewModel {
     this.scene.add(sun);
 
     GUNS.forEach((spec, i) => {
-      const { group: g, flash } = buildGun(i);
+      const { group: g, flash, roles } = buildGun(i);
       const hands = [buildHand(spec.rightHand, 0.25), buildHand(spec.leftHand, -0.4)];
       g.add(...hands);
+      // A shell or round that rides in the left hand while loading.
+      const shell = new THREE.Mesh(new THREE.CylinderGeometry(0.009, 0.009, 0.04, 8), new THREE.MeshStandardMaterial({ color: 0xc9a227, metalness: 0.6, roughness: 0.4 }));
+      shell.rotation.x = Math.PI / 2;
+      shell.position.set(spec.leftHand[0], spec.leftHand[1] + 0.045, spec.leftHand[2] - 0.03);
+      shell.visible = false;
+      hands[1].add(shell);
+      this.shells.push(shell);
+      this.roles.push(roles);
       this.hands.push(hands);
       g.visible = false;
       this.scene.add(g);
@@ -76,7 +88,10 @@ export class ViewModel {
     this.flashTime = 0.045;
   }
 
-  update(dt: number, ads: number, horizontalSpeed: number, grounded: boolean, visible: boolean): void {
+  /** `reload` is how far through a reload you are (0 to 1), or a negative number when you are not reloading. */
+  update(dt: number, adsIn: number, horizontalSpeed: number, grounded: boolean, visible: boolean, reload = -1): void {
+    const reloading = reload >= 0;
+    const ads = reloading ? 0 : adsIn;
     this.ads = ads;
     const spec = GUNS[this.current];
     const g = this.guns[this.current];
@@ -101,8 +116,32 @@ export class ViewModel {
     const x = hip[0] * (1 - ads) + bx;
     const y = hip[1] * (1 - ads) + spec.adsY * ads - by - (1 - this.swap) * 0.25;
     const z = hip[2] * (1 - ads) + spec.adsZ * ads + this.kickBack * 0.07;
-    g.position.set(x, y, z);
-    g.rotation.set(this.kickBack * 0.1 + (1 - this.swap) * 0.6, 0, 0);
+    const pose = reloading ? reloadPose(this.current, reload) : NEUTRAL;
+    g.position.set(x + pose.x, y + pose.y, z + pose.z);
+    g.rotation.set(this.kickBack * 0.1 + (1 - this.swap) * 0.6 + pose.rotX, 0, pose.rotZ);
+    this.applyPose(this.current, pose);
+  }
+
+  /** Move the hands, magazine, slide and pump to the reload pose (the neutral pose puts everything back). */
+  private applyPose(i: number, pose: typeof NEUTRAL): void {
+    const [right, left] = this.hands[i];
+    right.position.set(...pose.right);
+    left.position.set(...pose.left);
+    this.shells[i].visible = pose.shell;
+    const roles = this.roles[i];
+    for (const m of roles.mag) {
+      const base = m.userData.base as THREE.Vector3;
+      m.position.set(base.x, base.y + pose.magDy, base.z);
+      m.visible = pose.magShown;
+    }
+    for (const m of roles.bolt) {
+      const base = m.userData.base as THREE.Vector3;
+      m.position.set(base.x, base.y + pose.boltLift, base.z + pose.boltBack);
+    }
+    for (const m of roles.pump) {
+      const base = m.userData.base as THREE.Vector3;
+      m.position.set(base.x, base.y, base.z + pose.pumpBack);
+    }
   }
 
   render(renderer: THREE.WebGLRenderer): void {

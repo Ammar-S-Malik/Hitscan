@@ -14,7 +14,7 @@ export function box(min: Vec3, max: Vec3, kind: BoxKind = 'wall'): Box {
 }
 
 export const IDLE: Input = {
-  forward: 0, strafe: 0, yaw: 0, jump: false, sprint: false, slide: false, pitch: 0, fire: false, weapon: 0, aim: false, viewMs: 0,
+  forward: 0, strafe: 0, yaw: 0, jump: false, sprint: false, slide: false, pitch: 0, fire: false, weapon: 0, aim: false, reload: false, viewMs: 0,
 };
 
 export function input(patch: Partial<Input> = {}): Input {
@@ -52,6 +52,7 @@ export function randomInput(rand: () => number, yaw: number): Input {
     fire: false,
     weapon: 0,
     aim: false,
+    reload: false,
     viewMs: 0,
   };
 }

@@ -77,6 +77,7 @@ function botInput(bot: Bot, tick: number): Input {
     fire: Math.random() < 0.4,
     weapon: Math.floor(tick / 300) % 5,
     aim: false,
+    reload: false,
     viewMs: 0,
   };
 }

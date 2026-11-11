@@ -48,7 +48,7 @@ export class InputState {
       this.keys.add(e.code);
       if (e.code === 'Space') this.jumpLatch = true;
       if (e.code === 'KeyC') this.slideLatch = true;
-      if (e.code === 'KeyR') this.respawnLatch = true;
+      if (e.code === 'KeyT') this.respawnLatch = true;
       const digit = e.code.startsWith('Digit') ? Number(e.code.slice(5)) : 0;
       if (digit >= 1 && digit <= this.slots.length) this.weapon = this.slots[digit - 1];
     });
@@ -123,6 +123,7 @@ export class InputState {
       fire: this.fireHeld || this.fireLatch,
       weapon: this.weapon,
       aim: this.aimHeld,
+      reload: k.has('KeyR'),
       viewMs: 0, // filled in by the caller once it knows which moment of the server's time it is looking at
     };
     this.jumpLatch = false;

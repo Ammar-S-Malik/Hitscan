@@ -87,6 +87,8 @@ export interface WeaponDef {
   adsFov: number; // degrees while aiming down sights (the normal view is 75)
   scope: boolean; // draw a scope instead of the gun when aiming
   recoil: number; // radians the view kicks up per shot (client only)
+  magSize: number; // rounds in a full magazine (reserve ammo is unlimited)
+  reloadTicks: number; // how long a reload takes
 }
 
 /** The five guns, in key order (1 to 5). The index is what travels over the network. */
@@ -95,26 +97,31 @@ export const WEAPONS: readonly WeaponDef[] = [
     name: 'Pistol', damage: 22, pellets: 1, headMultiplier: 2, intervalTicks: 10, auto: false,
     spread: 0.006, adsSpread: 0.0015, falloffStart: 30, falloffEnd: 80, falloffMin: 0.7,
     switchTicks: 10, adsFov: 62, scope: false, recoil: 0.012,
+    magSize: 12, reloadTicks: 90,
   },
   {
     name: 'SMG', damage: 15, pellets: 1, headMultiplier: 1.5, intervalTicks: 4, auto: true,
     spread: 0.022, adsSpread: 0.008, falloffStart: 20, falloffEnd: 55, falloffMin: 0.6,
     switchTicks: 12, adsFov: 64, scope: false, recoil: 0.006,
+    magSize: 32, reloadTicks: 120,
   },
   {
     name: 'Shotgun', damage: 15, pellets: 8, headMultiplier: 1.5, intervalTicks: 40, auto: false,
     spread: 0.055, adsSpread: 0.035, falloffStart: 10, falloffEnd: 30, falloffMin: 0.2,
     switchTicks: 20, adsFov: 66, scope: false, recoil: 0.04,
+    magSize: 6, reloadTicks: 150,
   },
   {
     name: 'Rifle', damage: 28, pellets: 1, headMultiplier: 2, intervalTicks: 7, auto: true,
     spread: 0.012, adsSpread: 0.002, falloffStart: 40, falloffEnd: 100, falloffMin: 0.7,
     switchTicks: 15, adsFov: 52, scope: false, recoil: 0.01,
+    magSize: 28, reloadTicks: 130,
   },
   {
     name: 'Sniper', damage: 90, pellets: 1, headMultiplier: 2, intervalTicks: 78, auto: false,
     spread: 0.04, adsSpread: 0, falloffStart: 1000, falloffEnd: 1001, falloffMin: 1,
     switchTicks: 30, adsFov: 18, scope: true, recoil: 0.05,
+    magSize: 5, reloadTicks: 165,
   },
 ];
 export const WEAPON_COUNT = WEAPONS.length;

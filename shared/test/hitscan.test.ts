@@ -122,3 +122,59 @@ test('taking a gun out has a delay, and swapping cannot skip the wait after a sh
   const wait = ticksToFire(g, 0); // swap to the pistol straight away
   assert.ok(wait >= WEAPONS[4].intervalTicks - 6, `the pistol had to wait ${wait} ticks for the sniper's recovery`);
 });
+
+test('FireControl: magazines run dry, an empty gun reloads by itself, and the reload takes the gun\'s reload time', () => {
+  const rifle = 3;
+  const w = WEAPONS[rifle];
+  const f = new FireControl();
+  for (let i = 0; i < 40; i++) f.tick(false, true, rifle);
+  let shots = 0;
+  let ticks = 0;
+  // Hold the trigger: it fires the whole magazine, then is locked out for the reload, then fires again.
+  const log: number[] = [];
+  while (shots < w.magSize + 2 && ticks < 2000) {
+    if (f.tick(true, true, rifle)) {
+      shots++;
+      log.push(ticks);
+    }
+    ticks++;
+  }
+  assert.equal(shots, w.magSize + 2);
+  const gap = log[w.magSize] - log[w.magSize - 1];
+  assert.ok(gap > w.reloadTicks && gap <= w.reloadTicks + w.intervalTicks + 3, `gap after the last round was ${gap} ticks`);
+  assert.equal(f.mags[rifle], w.magSize - 2);
+});
+
+test('FireControl: R reloads a part-empty magazine, does nothing to a full one, and swapping guns cancels it', () => {
+  const smg = 1;
+  const f = new FireControl();
+  for (let i = 0; i < 40; i++) f.tick(false, true, smg);
+  f.tick(false, true, smg, true);
+  assert.equal(f.reloading, false, 'a full magazine does not reload');
+  f.tick(false, true, smg, false);
+  assert.equal(f.tick(true, true, smg), true);
+  f.tick(false, true, smg, false);
+  f.tick(false, true, smg, true); // R pressed
+  assert.equal(f.reloading, true);
+  for (let i = 0; i < WEAPONS[smg].reloadTicks + 2; i++) f.tick(false, true, smg, false);
+  assert.equal(f.ammo, WEAPONS[smg].magSize);
+  assert.equal(f.reloading, false);
+
+  f.tick(true, true, smg);
+  f.tick(false, true, smg, false);
+  f.tick(false, true, smg, true);
+  assert.equal(f.reloading, true);
+  f.tick(false, true, 0); // swap to the pistol mid-reload
+  assert.equal(f.reloading, false, 'swapping abandons the reload');
+  assert.ok(f.mags[smg] < WEAPONS[smg].magSize, 'and the magazine is as it was');
+});
+
+test('FireControl: a dead player does not reload, and reset gives full magazines', () => {
+  const f = new FireControl();
+  for (let i = 0; i < 40; i++) f.tick(false, true, 0);
+  f.tick(true, true, 0);
+  f.tick(false, false, 0, true);
+  assert.equal(f.reloading, false);
+  f.reset();
+  assert.equal(f.ammo, WEAPONS[0].magSize);
+});

@@ -228,7 +228,7 @@ export class GameServer {
           p.processed++;
           p.budget -= 1;
           applied++;
-          if (p.fire.tick(input.fire && this.combatEnabled, p.alive, input.weapon)) this.shoot(p, input, q.seq);
+          if (p.fire.tick(input.fire && this.combatEnabled, p.alive, input.weapon, input.reload)) this.shoot(p, input, q.seq);
         }
         if (p.queue.length === 0) p.buffering = true; // ran dry: let it refill before moving again
       }

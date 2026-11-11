@@ -3,8 +3,9 @@
  * malformed input instead of throwing: the server must survive any bytes a client sends.
  *
  * Client -> server
- *   input packet:  u8 type(1) | u8 count | count x { u32 seq, i8 forward, i8 strafe, f32 yaw, f32 pitch, u8 flags, u32 viewMs }
+ *   input packet:  u8 type(1) | u8 count | count x { u32 seq, i8 forward, i8 strafe, f32 yaw, f32 pitch, u8 flags, u32 viewMs, u8 flags2 }
  *                  flags: 1 jump, 2 sprint, 4 slide, 8 fire, 16 aim, bits 5-7 the weapon index
+ *                  flags2: 1 reload
  * Server -> client
  *   welcome:   u8 type(16) | u16 playerId | u8 tickRate | u8 snapshotEvery | u32 tick | f32 yaw | u8 nameLen | name
  *   snapshot:  u8 type(17) | u32 tick | u32 ack | 8 x f64 own state | u8 flags | u8 health | u8 respawnTicks |
@@ -82,7 +83,7 @@ export type ServerMessage =
 // ------------------------------------------------------------------ inputs
 
 const AXIS_SCALE = 127;
-const INPUT_BYTES = 19;
+const INPUT_BYTES = 20;
 const MAX_PITCH = Math.fround(Math.PI / 2); // as a float32, so a clamped value survives the wire unchanged
 
 function quantAxis(v: number): number {
@@ -109,6 +110,7 @@ export function quantizeInput(i: Input): Input {
     fire: Boolean(i.fire),
     weapon: quantWeapon(i.weapon),
     aim: Boolean(i.aim),
+    reload: Boolean(i.reload),
     viewMs: quantViewMs(i.viewMs),
   };
 }
@@ -148,6 +150,7 @@ export function encodeInputPacket(inputs: readonly SeqInput[]): Uint8Array {
         (input.aim ? 16 : 0) | (quantWeapon(input.weapon) << 5),
     );
     v.setUint32(o + 15, quantViewMs(input.viewMs), true);
+    v.setUint8(o + 19, input.reload ? 1 : 0);
     o += INPUT_BYTES;
   }
   return buf;
@@ -181,6 +184,7 @@ export function decodeInputPacket(bytes: Uint8Array): SeqInput[] | null {
         fire: (flags & 8) !== 0,
         aim: (flags & 16) !== 0,
         weapon: quantWeapon(flags >> 5),
+        reload: (v.getUint8(o + 19) & 1) !== 0,
         viewMs: v.getUint32(o + 15, true),
       },
     });

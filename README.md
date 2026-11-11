@@ -89,7 +89,8 @@ last server correction moved you.
 | 1 / 2 / mouse wheel | Your primary gun / your pistol (see Classes) |
 | Tab | Hold to show the scoreboard |
 | M | Mute / unmute (volume sliders are in the lobby and the pause screen) |
-| R | Respawn (offline only) |
+| R | Reload (also happens by itself when a magazine runs dry) |
+| T | Respawn (free roam only) |
 | Esc | Release the mouse. The pause screen has Leave match, volume, mouse sensitivity, field of view and toggles for the crosshair, mini-map and debug readout (saved in your browser) |
 
 The slide needs a fast run-up and then has a cooldown. The tunnel at the south end of the map
@@ -115,17 +116,17 @@ is only slide-high: slide in, and you stay crouched until you are clear of the c
 
 ### The guns
 
-| Key | Gun | Damage | Fire rate | Notes |
-|---|---|---|---|---|
-| 1 | Pistol | 22 | 6/s, click per shot | Accurate, falls off slowly |
-| 2 | SMG | 12 | 15/s, automatic | Wide spread from the hip, strong when aimed |
-| 3 | Shotgun | 8 pellets x 12 | 1.25/s, click per shot | Devastating up close, weak beyond 25 m |
-| 4 | Rifle | 28 | 8.6/s, automatic | The all-rounder |
-| 5 | Sniper | 90 | 0.77/s, click per shot | One shot to the head, scope when aimed, wild from the hip |
+| Key | Gun | Damage | Fire rate | Magazine / reload | Notes |
+|---|---|---|---|---|---|
+| 1 | Pistol | 22 | 6/s, click per shot | 12 / 1.5 s | Accurate, falls off slowly |
+| 2 | SMG | 12 | 15/s, automatic | 32 / 2.0 s | Wide spread from the hip, strong when aimed |
+| 3 | Shotgun | 8 pellets x 12 | 1.25/s, click per shot | 6 / 2.5 s | Devastating up close, weak beyond 25 m |
+| 4 | Rifle | 28 | 8.6/s, automatic | 28 / 2.2 s | The all-rounder |
+| 5 | Sniper | 90 | 0.77/s, click per shot | 5 / 2.75 s | One shot to the head, scope when aimed, wild from the hip |
 
 Head shots multiply damage (double for most guns, 1.5x for the SMG and shotgun). Damage falls off with distance
 (per gun). Aiming down sights narrows the random spread, zooms in, and slows the mouse to match. Taking a gun
-out takes a moment, and swapping can't be used to skip a gun's own reload time. All the numbers are in
+out takes a moment. Reserve ammo is unlimited; each magazine empties, and swapping guns cancels a reload in progress (the magazine stays as it was). Respawning refills everything. All the numbers are in
 `WEAPONS` in `shared/src/config.ts`.
 
 The scatter is seeded from the input number and your player id, so the server and your own screen compute

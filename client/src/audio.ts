@@ -171,6 +171,32 @@ export class GameAudio {
     this.play({ tone: [{ f0: 400, f1: 900, dur: 0.25, gain: 0.2 }] });
   }
 
+  /** One sound of a reload. Metal clicks and clacks, pitched a little differently for each kind. */
+  reloadCue(kind: 'out' | 'in' | 'rack' | 'shell' | 'bolt', at?: Vec3): void {
+    switch (kind) {
+      case 'out':
+        this.play({ noise: [{ dur: 0.05, filter: 'bandpass', freq: 2200, gain: 0.3 }], tone: [{ type: 'square', f0: 320, dur: 0.04, gain: 0.06 }] }, at);
+        break;
+      case 'in':
+        this.play({ noise: [{ dur: 0.07, filter: 'bandpass', freq: 1400, gain: 0.4 }], tone: [{ type: 'square', f0: 220, f1: 140, dur: 0.06, gain: 0.1 }] }, at);
+        break;
+      case 'rack':
+        this.play({ noise: [{ dur: 0.04, filter: 'highpass', freq: 3000, gain: 0.3 }, { dur: 0.05, filter: 'bandpass', freq: 1800, gain: 0.35, delay: 0.07 }] }, at);
+        break;
+      case 'shell':
+        this.play({ noise: [{ dur: 0.03, filter: 'bandpass', freq: 3200, gain: 0.25 }], tone: [{ type: 'square', f0: 700, dur: 0.025, gain: 0.05 }] }, at);
+        break;
+      case 'bolt':
+        this.play({ noise: [{ dur: 0.05, filter: 'bandpass', freq: 1600, gain: 0.35 }], tone: [{ type: 'square', f0: 260, dur: 0.05, gain: 0.08 }] }, at);
+        break;
+    }
+  }
+
+  /** Pulling the trigger on an empty gun. */
+  dryFire(): void {
+    this.play({ noise: [{ dur: 0.025, filter: 'bandpass', freq: 3500, gain: 0.25 }] });
+  }
+
   switched(): void {
     this.play({ noise: [{ dur: 0.03, filter: 'bandpass', freq: 4000, gain: 0.3 }], tone: [{ type: 'square', f0: 500, dur: 0.03, gain: 0.05 }] });
   }

@@ -14,6 +14,8 @@ export interface GunPart {
   shape?: 'box' | 'cyl';
   glow?: number; // emissive colour, for lenses and sights
   shiny?: boolean;
+  /** Moving parts the reload animation drives: the magazine, a pump, or the bolt / slide / charging handle. */
+  role?: 'mag' | 'pump' | 'bolt';
 }
 
 export interface GunSpec {
@@ -76,9 +78,10 @@ export const GUNS: GunSpec[] = [
   { // Pistol
     parts: [
       { size: [0.05, 0.06, 0.24], pos: [0, 0, -0.12], color: MID },
-      { size: [0.052, 0.012, 0.22], pos: [0, 0.034, -0.12], color: STEEL, shiny: true }, // slide top
+      { size: [0.052, 0.012, 0.22], pos: [0, 0.034, -0.12], color: STEEL, shiny: true, role: 'bolt' }, // slide top
       { size: [0.045, 0.12, 0.06], pos: [0, -0.085, -0.02], color: DARK, rotX: 0.2 },
-      { size: [0.046, 0.02, 0.07], pos: [0, -0.15, -0.002], color: LIGHT, rotX: 0.2 }, // magazine base
+      { size: [0.046, 0.02, 0.07], pos: [0, -0.15, -0.002], color: LIGHT, rotX: 0.2, role: 'mag' }, // magazine base
+      { size: [0.04, 0.1, 0.05], pos: [0, -0.085, -0.02], color: LIGHT, rotX: 0.2, role: 'mag' }, // the magazine itself, hidden in the grip until it is pulled out
       { size: [0.012, 0.03, 0.06], pos: [0, -0.05, -0.1], color: DARK }, // trigger guard
       cyl(0.011, 0.04, [0, 0.003, -0.255], DARK),
       ...ironSights(0.05, 0.04, -0.015, -0.225, false),
@@ -90,8 +93,9 @@ export const GUNS: GunSpec[] = [
     parts: [
       { size: [0.06, 0.09, 0.34], pos: [0, 0, -0.15], color: DARK },
       { size: [0.05, 0.012, 0.3], pos: [0, 0.05, -0.15], color: MID }, // top rail
-      { size: [0.04, 0.15, 0.05], pos: [0, -0.115, -0.12], color: MID, rotX: 0.1 },
-      { size: [0.042, 0.02, 0.06], pos: [0, -0.2, -0.105], color: LIGHT, rotX: 0.1 },
+      { size: [0.04, 0.15, 0.05], pos: [0, -0.115, -0.12], color: MID, rotX: 0.1, role: 'mag' },
+      { size: [0.042, 0.02, 0.06], pos: [0, -0.2, -0.105], color: LIGHT, rotX: 0.1, role: 'mag' },
+      { size: [0.012, 0.018, 0.05], pos: [0.036, 0.03, -0.1], color: STEEL, role: 'bolt' }, // charging handle
       { size: [0.045, 0.1, 0.06], pos: [0, -0.085, 0.0], color: MID, rotX: 0.2 },
       cyl(0.017, 0.22, [0, 0.01, -0.4], LIGHT), // suppressor
       cyl(0.019, 0.02, [0, 0.01, -0.5], DARK),
@@ -107,8 +111,8 @@ export const GUNS: GunSpec[] = [
       cyl(0.023, 0.62, [0, 0.025, -0.3], LIGHT, { shiny: true }), // barrel
       cyl(0.02, 0.5, [0, -0.02, -0.25], DARK), // magazine tube
       cyl(0.024, 0.03, [0, -0.02, -0.52], STEEL), // tube cap
-      { size: [0.075, 0.06, 0.18], pos: [0, -0.04, -0.34], color: WOOD }, // pump
-      { size: [0.078, 0.012, 0.18], pos: [0, -0.07, -0.34], color: 0x4f3622 },
+      { size: [0.075, 0.06, 0.18], pos: [0, -0.04, -0.34], color: WOOD, role: 'pump' }, // pump
+      { size: [0.078, 0.012, 0.18], pos: [0, -0.07, -0.34], color: 0x4f3622, role: 'pump' },
       { size: [0.07, 0.1, 0.3], pos: [0, -0.005, 0.0], color: DARK },
       { size: [0.012, 0.03, 0.05], pos: [0, -0.06, -0.06], color: DARK }, // trigger guard
       { size: [0.055, 0.12, 0.3], pos: [0, -0.03, 0.27], color: WOOD, rotX: -0.12 },
@@ -125,8 +129,9 @@ export const GUNS: GunSpec[] = [
       { size: [0.06, 0.07, 0.24], pos: [0, 0.0, -0.5], color: LIGHT }, // handguard
       cyl(0.014, 0.12, [0, 0.015, -0.7], DARK), // barrel tip
       cyl(0.02, 0.05, [0, 0.015, -0.76], STEEL, { shiny: true }), // flash hider
-      { size: [0.05, 0.17, 0.07], pos: [0, -0.125, -0.15], color: MID, rotX: 0.2 }, // magazine
-      { size: [0.052, 0.02, 0.075], pos: [0, -0.215, -0.185], color: DARK, rotX: 0.2 },
+      { size: [0.05, 0.17, 0.07], pos: [0, -0.125, -0.15], color: MID, rotX: 0.2, role: 'mag' }, // magazine
+      { size: [0.052, 0.02, 0.075], pos: [0, -0.215, -0.185], color: DARK, rotX: 0.2, role: 'mag' },
+      { size: [0.012, 0.02, 0.05], pos: [0.04, 0.035, -0.02], color: STEEL, role: 'bolt' }, // charging handle
       { size: [0.045, 0.1, 0.06], pos: [0, -0.085, 0.02], color: MID, rotX: 0.2 },
       { size: [0.055, 0.1, 0.27], pos: [0, -0.01, 0.27], color: MID, rotX: -0.08 },
       ...ironSights(0.092, 0.056, -0.04, -0.42, true),
@@ -147,8 +152,8 @@ export const GUNS: GunSpec[] = [
       { size: [0.02, 0.04, 0.03], pos: [0, 0.055, -0.26], color: DARK },
       { size: [0.05, 0.12, 0.34], pos: [0, -0.02, 0.32], color: WOOD, rotX: -0.1 },
       { size: [0.045, 0.1, 0.06], pos: [0, -0.085, 0.02], color: MID, rotX: 0.2 },
-      { size: [0.03, 0.012, 0.012], pos: [0.045, 0.02, 0.0], color: STEEL }, // bolt handle
-      { size: [0.016, 0.016, 0.016], pos: [0.065, 0.02, 0.0], color: STEEL },
+      { size: [0.03, 0.012, 0.012], pos: [0.045, 0.02, 0.0], color: STEEL, role: 'bolt' }, // bolt handle
+      { size: [0.016, 0.016, 0.016], pos: [0.065, 0.02, 0.0], color: STEEL, role: 'bolt' },
       { size: [0.01, 0.1, 0.01], pos: [-0.03, -0.12, -0.5], color: DARK, rotZ: 0.4 }, // bipod legs
       { size: [0.01, 0.1, 0.01], pos: [0.03, -0.12, -0.5], color: DARK, rotZ: -0.4 },
     ],
@@ -176,12 +181,15 @@ function materialFor(p: GunPart): THREE.MeshStandardMaterial {
 export interface GunModel {
   group: THREE.Group;
   flash: THREE.Mesh;
+  /** The moving parts, each with its resting position in `userData.base`. */
+  roles: { mag: THREE.Mesh[]; pump: THREE.Mesh[]; bolt: THREE.Mesh[] };
 }
 
 /** Builds one gun. The muzzle flash starts hidden; the caller turns it on for a few frames per shot. */
 export function buildGun(index: number): GunModel {
   const spec = GUNS[index];
   const group = new THREE.Group();
+  const roles: GunModel['roles'] = { mag: [], pump: [], bolt: [] };
   for (const p of spec.parts) {
     const geometry =
       p.shape === 'cyl'
@@ -191,6 +199,10 @@ export function buildGun(index: number): GunModel {
     mesh.position.set(...p.pos);
     if (p.rotX) mesh.rotation.x = p.rotX;
     if (p.rotZ) mesh.rotation.z = p.rotZ;
+    if (p.role) {
+      mesh.userData.base = mesh.position.clone();
+      roles[p.role].push(mesh);
+    }
     group.add(mesh);
   }
   const flash = new THREE.Mesh(
@@ -201,5 +213,5 @@ export function buildGun(index: number): GunModel {
   flash.visible = false;
   flash.userData.own = true;
   group.add(flash);
-  return { group, flash };
+  return { group, flash, roles };
 }

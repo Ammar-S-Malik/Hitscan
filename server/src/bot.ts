@@ -8,7 +8,7 @@
  * Difficulty only changes how quickly it reacts, how fast it can turn, how much it misses by and
  * how smartly it picks guns and moves.
  */
-import { WEAPONS, createRng, eyeHeight, traceWorld } from '@hitscan/shared';
+import { FireControl, WEAPONS, createRng, eyeHeight, traceWorld } from '@hitscan/shared';
 import type { Box, Input, PlayerState, Spawn, Vec3 } from '@hitscan/shared';
 
 export type Difficulty = 'easy' | 'normal' | 'hard';
@@ -78,6 +78,7 @@ export class Bot {
   private ticks = 0;
 
   private weapon: number; // its class's primary gun; a bot never swaps
+  private trigger = new FireControl(); // the same ammo rule the server applies, so the bot knows its magazine
 
   private targetId = 0;
   private lostFor = 999; // ticks since we last saw anybody
@@ -123,7 +124,8 @@ export class Bot {
       this.lostFor = 999;
       this.unstick = 0;
       this.burst = 0;
-      return this.build(0, 0, false, false, false, false, viewMs);
+      this.trigger.reset();
+      return this.build(0, 0, false, false, false, false, false, viewMs);
     }
 
     const eye: Vec3 = [me.x, me.y + eyeHeight(me), me.z];
@@ -302,11 +304,15 @@ export class Bot {
     if (faceYaw !== null) this.turnTo(faceYaw, 0, 0.12, 6);
     const f = moveX * -Math.sin(this.yaw) + moveZ * -Math.cos(this.yaw);
     const sd = moveX * Math.cos(this.yaw) + moveZ * -Math.sin(this.yaw);
-    return this.build(clamp(f, -1, 1), clamp(sd, -1, 1), jump && me.grounded, sprint, fire, aim, viewMs);
+    // Top up the magazine while nobody is around. (An empty one reloads by itself.)
+    const reload = !best && !this.trigger.reloading && this.trigger.ammo < WEAPONS[this.weapon].magSize * 0.5;
+    const out = this.build(clamp(f, -1, 1), clamp(sd, -1, 1), jump && me.grounded, sprint, fire, aim, reload, viewMs);
+    this.trigger.tick(out.fire, true, out.weapon, out.reload);
+    return out;
   }
 
-  private build(forward: number, strafe: number, jump: boolean, sprint: boolean, fire: boolean, aim: boolean, viewMs: number): Input {
-    return { forward, strafe, yaw: this.yaw, jump, sprint, slide: false, pitch: this.pitch, fire, weapon: this.weapon, aim, viewMs };
+  private build(forward: number, strafe: number, jump: boolean, sprint: boolean, fire: boolean, aim: boolean, reload: boolean, viewMs: number): Input {
+    return { forward, strafe, yaw: this.yaw, jump, sprint, slide: false, pitch: this.pitch, fire, weapon: this.weapon, aim, reload, viewMs };
   }
 
   private turnTo(wantYaw: number, wantPitch: number, snap: number, maxRate: number): void {
