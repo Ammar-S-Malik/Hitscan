@@ -462,9 +462,12 @@ function onLobbyText(text: string): void {
   }
 }
 
-const net: NetClient | null = options.offline
-  ? null
-  : new NetClient(options, {
+// Free hosts (Render) sleep when idle and take about a minute to wake, so a first connection that
+// fails is retried every 5 seconds for about two minutes before giving up.
+let connectAttempts = 0;
+const MAX_CONNECT_ATTEMPTS = 24;
+const makeNet = (): NetClient =>
+  new NetClient(options, {
       onOpen: () => {
         netOpen = true;
         const saved = (document.getElementById('nick') as HTMLInputElement).value;
@@ -481,6 +484,14 @@ const net: NetClient | null = options.offline
         netOpen = false;
         if (mode === 'offline') {
           updateScreens();
+          return;
+        }
+        if (!wasConnected && mode === 'connecting' && connectAttempts < MAX_CONNECT_ATTEMPTS) {
+          connectAttempts++;
+          lobbyUI.setStatus(`Waking the server up (free hosting sleeps when idle, this can take a minute). Try ${connectAttempts} of ${MAX_CONNECT_ATTEMPTS}...`);
+          setTimeout(() => {
+            net = makeNet();
+          }, 5000);
           return;
         }
         resetGameState();
@@ -511,6 +522,7 @@ const net: NetClient | null = options.offline
         }
       },
     });
+let net: NetClient | null = options.offline ? null : makeNet();
 
 // Keep the match list fresh while the lobby is open.
 setInterval(() => {

@@ -29,12 +29,79 @@ Good for demos. The game is up only while your PC and the tunnel are running.
 2. Start the server (PowerShell): `$env:TRUST_PROXY="1"; $env:ALLOWED_ORIGINS="https://YOUR-SITE.pages.dev"; npm run server`
 3. For a permanent address, create a named tunnel on a domain you own in the Cloudflare dashboard (Zero Trust, Networks, Tunnels) and point it at `http://localhost:8787`.
 
-### Option B: a container host
+### Option B: Render free plan (no card, sleeps when idle)
+
+`render.yaml` in the repo describes the service.
+1. Push the repo to GitHub. On render.com sign up with GitHub, then New, Blueprint, pick the `Hitscan` repo, apply.
+2. When it asks for `ALLOWED_ORIGINS`, enter your Cloudflare Pages address (for example `https://hitscan.pages.dev`; you can edit it later under Environment).
+3. Wait for the first deploy (a few minutes). Your server address is the service URL with `wss://`, for example `wss://hitscan-server.onrender.com`. `https://hitscan-server.onrender.com/health` should print `ok`.
+4. In Cloudflare Pages set `VITE_SERVER_URL=wss://hitscan-server.onrender.com` and redeploy.
+
+The free plan sleeps after 15 minutes with no traffic and takes about a minute to wake, and it has only 0.1 CPU and 512 MB, so keep
+`MAX_MATCHES` low (8 is set). The page retries for about two minutes and shows "Waking the server up", so the first visitor waits instead of seeing an error.
+To pre-wake it before showing someone, open the `/health` address first.
+
+### Option C: any container host
 
 `docker build -t hitscan-server .` then `docker run -p 8787:8787 -e ALLOWED_ORIGINS=https://YOUR-SITE.pages.dev hitscan-server`.
-Works on Fly.io, Render, Railway, or an always-free cloud VM (for example Oracle Cloud Always Free).
-Put it behind HTTPS (these hosts do this for you) so the page can use `wss://`. Set `TRUST_PROXY=1` there too.
-Free tiers that sleep when idle will add a wake-up delay to the first player.
+Works on Railway, Koyeb, or any VM with Docker. Put it behind HTTPS so the page can use `wss://`, and set `TRUST_PROXY=1`.
+
+### Option D: an always-on VM (about $4-6 a month, recommended for a permanent demo)
+
+The server runs 24 hours a day on a small virtual machine with its own HTTPS address. Cloudflare's free plan cannot run the
+game server itself (WebSocket messages count against a 100,000 requests/day limit, about 9 player-hours), and the free VM
+offers are unreliable (Oracle's Always Free reclaims idle VMs and has cut allowances; Fly.io has no free tier for new
+accounts). A small paid VM is the dependable way. Nothing in this section has been run on a real VM yet, so expect a snag or two.
+
+**1. Make the VM.** Any provider works (Hetzner, DigitalOcean, Vultr, Linode). The cheapest plan with 1 vCPU and 1 GB is plenty:
+the game server needs well under 1 core and 200 MB for 60 players.
+- Image: Ubuntu 24.04 (or 22.04).
+- Add your SSH public key when creating it. Note the public IP address.
+- Make sure ports 80 and 443 are open (most providers allow all inbound by default; if there is a cloud firewall, add TCP 80 and 443).
+
+**2. (Skip.)** No extra firewall steps on most providers; the script opens the VM's own firewall.
+
+**3. Get a free address.** On duckdns.org sign in, create a name (for example `hitscan-ammar`), and set its IP to the VM's public
+IP. Your server address is then `hitscan-ammar.duckdns.org`.
+
+**4. Run the setup script.** From PowerShell (the login user is `root` or `ubuntu` depending on the provider):
+
+```powershell
+ssh root@<public-ip>      # or ubuntu@<public-ip>, depending on the provider
+```
+
+then on the VM:
+
+```bash
+git clone https://github.com/Ammar-S-Malik/Hitscan.git && cd Hitscan
+./deploy/vm-setup.sh hitscan-ammar.duckdns.org https://YOUR-SITE.pages.dev
+```
+
+It installs Node, runs the game server as a service that restarts itself, gets an HTTPS certificate with Caddy, and opens
+the VM's own firewall. (A private repository needs a GitHub token in the clone address.) Check it:
+
+```bash
+curl https://hitscan-ammar.duckdns.org/health    # prints: ok
+sudo systemctl status hitscan                    # active (running)
+journalctl -u hitscan -f                         # the log; Ctrl+C to leave it
+```
+
+**5. Point the site at it.** In Cloudflare Pages, set `VITE_SERVER_URL=wss://hitscan-ammar.duckdns.org` and redeploy.
+`ALLOWED_ORIGINS` (the second argument above) must match your Pages address exactly, including `https://`. If you used a
+placeholder at first, run the script again with the right one.
+
+**Updating the server later** (the service runs from `/home/hitscan/app`, a separate copy from the one you cloned to run the script):
+
+```bash
+sudo -u hitscan git -C /home/hitscan/app pull
+sudo -u hitscan bash -c 'cd /home/hitscan/app && npm ci --omit=dev'
+sudo systemctl restart hitscan
+```
+
+**Things that can go wrong**
+- **The address changes if you delete and recreate the VM.** Update the DuckDNS entry.
+- **"Connection refused" or a certificate error** almost always means port 80 or 443 is closed in one of the two firewalls
+  (the provider's, or the VM's own, which the script opens) or DuckDNS points at the wrong IP. Caddy needs port 80 reachable to get the certificate.
 
 ## 2. Client on Cloudflare Pages
 

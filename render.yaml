@@ -1,0 +1,14 @@
+# Render Blueprint: New > Blueprint, pick this repo. Free plan, no card.
+services:
+  - type: web
+    name: hitscan-server
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: TRUST_PROXY
+        value: "1"
+      - key: MAX_MATCHES
+        value: "8"
+      - key: ALLOWED_ORIGINS
+        sync: false   # you type this in the dashboard: your Cloudflare Pages address, e.g. https://hitscan.pages.dev
