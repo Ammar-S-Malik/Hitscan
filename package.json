@@ -1,0 +1,24 @@
+{
+  "name": "shooter",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "shared",
+    "client"
+  ],
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "dev": "vite client",
+    "build": "vite build client",
+    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test \"shared/test/*.test.ts\"",
+    "typecheck": "tsc -p shared && tsc -p client"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/three": "^0.187.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.7"
+  }
+}

@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Shooter</title>
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #101418; font-family: system-ui, sans-serif; }
+      canvas { display: block; }
+      #hud { position: fixed; left: 12px; top: 12px; color: #e8eef5; font: 13px/1.5 ui-monospace, Consolas, monospace;
+             text-shadow: 0 1px 2px #000; pointer-events: none; white-space: pre; }
+      #crosshair { position: fixed; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px;
+                   border-radius: 50%; background: rgba(255,255,255,.85); box-shadow: 0 0 0 1px rgba(0,0,0,.6); pointer-events: none; }
+      #overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center;
+                 color: #fff; background: rgba(10,12,16,.6); cursor: pointer; font-size: 16px; line-height: 1.8; }
+      #overlay b { font-size: 24px; }
+      kbd { background: #2a323c; border-radius: 4px; padding: 1px 6px; font-family: inherit; }
+    </style>
+  </head>
+  <body>
+    <div id="hud"></div>
+    <div id="crosshair"></div>
+    <div id="overlay">
+      <div>
+        <b>Click to play</b><br />
+        <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move &nbsp; <kbd>Mouse</kbd> look &nbsp; <kbd>Space</kbd> jump<br />
+        <kbd>Shift</kbd> sprint &nbsp; <kbd>C</kbd> slide (sprint first, then tap C) &nbsp; <kbd>R</kbd> respawn<br />
+        <kbd>Esc</kbd> release the mouse
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
