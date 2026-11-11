@@ -133,7 +133,6 @@ export class Humanoid {
     this.upper.position.y = 0.9 - 0.55 * lean;
     this.upper.rotation.x = lean * 0.9 + Math.sin(this.phase * 2) * 0.012 * this.swing;
     this.upper.position.z = lean * 0.12;
-    this.root.position.y = 0; // set by the caller; kept here so the pose never drifts
 
     this.flashTime = Math.max(0, this.flashTime - dt);
     this.guns[this.gun].flash.visible = this.flashTime > 0;
