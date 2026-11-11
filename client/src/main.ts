@@ -17,6 +17,8 @@ import { NetClient, parseNetOptions } from './net.ts';
 import { LocalGame } from '../../server/src/local.ts';
 import { ViewModel } from './viewmodel.ts';
 import { reloadCues } from './reloadpose.ts';
+import { renderGunIcons } from './gunicons.ts';
+import { loadCareer, saveCareer } from './career.ts';
 import { buildWorld, disposeWorld } from './world.ts';
 import type { World } from './world.ts';
 
@@ -123,7 +125,10 @@ pauseVolume.addEventListener('input', () => {
 // The pause screen has two views: the two buttons, and the settings. Clicking the dim background gets you back in the game.
 const pauseMenu = document.getElementById('pause-menu') as HTMLElement;
 const settingsPanel = document.getElementById('settings-panel') as HTMLElement;
+const settingsBody = document.getElementById('settings-body') as HTMLElement;
 function showSettings(open: boolean): void {
+  // The menu borrows the settings controls for its own Settings page; take them back for the pause screen.
+  if (open && settingsBody.parentElement !== settingsPanel) settingsPanel.insertBefore(settingsBody, document.getElementById('close-settings'));
   pauseMenu.style.display = open ? 'none' : '';
   settingsPanel.style.display = open ? '' : 'none';
 }
@@ -190,6 +195,11 @@ const hpEl = el('hp');
 const healthFill = el('healthfill');
 const killfeedEl = el('killfeed');
 const kdEl = el('kd');
+const vitalsEl = el('vitals');
+const vnameEl = el('vname');
+const leaderEl = el('leader');
+let kdShown = '';
+let leaderShown = '';
 const scoresEl = el('scores');
 const deadEl = el('dead');
 const deadBig = document.createElement('div');
@@ -309,6 +319,15 @@ function onEvents(events: ShotEvent[]): void {
       damageFlash = 0.7;
       audio.damaged();
     }
+    if (e.killed && (e.shooter === myId || e.victim === myId)) {
+      if (e.shooter === myId && e.victim !== myId) {
+        career.kills++;
+        if (e.headshot) career.headshots++;
+      }
+      if (e.victim === myId) career.deaths++;
+      saveCareer(career);
+      lobbyUI.setCareer(career);
+    }
     if (e.killed) {
       feed.push({
         killer: name(e.shooter),
@@ -324,6 +343,7 @@ function onEvents(events: ShotEvent[]): void {
   }
 }
 
+const gunIcons = renderGunIcons(); // side-on pictures of the guns for the menu and the gun slots
 // ---- screens: the lobby, the "click to play" pause screen, or the game itself
 const lobbyUI = new LobbyUI(
   {
@@ -342,7 +362,10 @@ const lobbyUI = new LobbyUI(
   },
   audio.volume,
   allMaps.map((m) => ({ name: m.name, size: m.size, players: m.maxPlayers })),
+  gunIcons,
 );
+const career = loadCareer();
+lobbyUI.setCareer(career);
 lobbyUI.onJoin((id) => net?.sendText({ t: 'join', id }));
 const matchHud = new MatchHud();
 
@@ -542,6 +565,10 @@ function onLobbyText(text: string): void {
       if (mode !== 'joining' && mode !== 'online') break;
       matchPhase = 'ended';
       matchHud.showEnd(msg.rows, msg.winner, myId, msg.nextIn);
+      career.rounds++;
+      if (msg.winner !== 0 && msg.winner === myId) career.wins++;
+      saveCareer(career);
+      lobbyUI.setCareer(career);
       audio.roundEnd(msg.winner === myId);
       break;
     }
@@ -834,13 +861,14 @@ function frame(now: number): void {
     cueProgress = reloadProgress;
   }
   ammoNowEl.textContent = String(fireControl.ammo);
-  ammoMaxEl.textContent = `/ ${wDef.magSize}`;
+  ammoMaxEl.textContent = String(wDef.magSize);
   ammoEl.className = fireControl.reloading ? 'reloading' : fireControl.ammo <= Math.ceil(wDef.magSize * 0.25) ? 'low' : '';
   reloadFillEl.style.width = `${Math.max(0, reloadProgress) * 100}%`;
   ammoEl.style.display = showGun ? '' : 'none';
+  weaponsEl.style.display = showGun ? '' : 'none';
   const scoped = weaponNow.scope && adsAmount > 0.9;
   scopeEl.style.display = scoped ? 'block' : 'none';
-  crosshairEl.style.display = scoped || !settings.values.crosshair ? 'none' : 'block';
+  crosshairEl.style.display = scoped || !settings.values.crosshair || !showGun ? 'none' : 'block';
   crosshairEl.style.opacity = String(Math.max(0, 1 - adsAmount * 1.3)); // the sights are the crosshair when aiming
   vignetteEl.style.opacity = String(scoped ? 0 : adsAmount * 0.9);
 
@@ -852,7 +880,15 @@ function frame(now: number): void {
         slot.className = w === input.weapon ? 'slot on' : 'slot';
         const key = document.createElement('b');
         key.textContent = String(i + 1);
-        slot.append(key, WEAPONS[w].name);
+        const label = document.createElement('span');
+        label.textContent = WEAPONS[w].name;
+        slot.append(key, label);
+        if (gunIcons[w]) {
+          const img = document.createElement('img');
+          img.src = gunIcons[w];
+          img.alt = '';
+          slot.append(img);
+        }
         return slot;
       }),
     );
@@ -911,17 +947,50 @@ function frame(now: number): void {
       );
     }
     const online = mode === 'online';
-    hpEl.textContent = online ? `${health}` : '';
-    kdEl.replaceChildren();
-    if (online) {
-      const k = document.createElement('b');
-      k.textContent = String(kills);
-      const d = document.createElement('b');
-      d.textContent = String(deaths);
-      kdEl.append('KILLS ', k, '   DEATHS ', d);
+    const hpNow = online ? health : 100;
+    const playing = online || mode === 'offline';
+    vitalsEl.style.display = playing ? '' : 'none';
+    vitalsEl.className = hpNow <= 30 ? 'hurt' : '';
+    hpEl.textContent = String(hpNow);
+    vnameEl.textContent = lobbyUI.name.trim() || 'You';
+    const kdKey = online ? `${kills}/${deaths}` : '';
+    if (kdKey !== kdShown) {
+      kdShown = kdKey;
+      kdEl.replaceChildren();
+      if (online) {
+        const k = document.createElement('b');
+        k.textContent = String(kills);
+        const d = document.createElement('b');
+        d.textContent = String(deaths);
+        kdEl.append('K ', k, '  D ', d);
+      }
     }
-    healthFill.style.width = `${online ? health : 100}%`;
-    healthFill.style.background = health > 60 ? '#4ade80' : health > 30 ? '#ffc533' : '#ff4d4d';
+    healthFill.style.width = `${hpNow}%`;
+    healthFill.style.background = hpNow > 60 ? '#7be04a' : hpNow > 30 ? '#ffd23f' : '#ff5964';
+    // The top few players, always on screen; Tab shows everyone.
+    const top = online ? [...scoreRows].sort((a, b) => b.kills - a.kills || a.deaths - b.deaths) : [];
+    const shownRows = top.slice(0, 5);
+    const myPlace = top.findIndex((r) => r.id === myId);
+    if (myPlace >= 5) shownRows[4] = top[myPlace];
+    const leaderKey = shownRows.map((r) => `${r.id}:${r.kills}:${name(r.id)}`).join('|');
+    if (leaderKey !== leaderShown) {
+      leaderShown = leaderKey;
+      leaderEl.style.display = shownRows.length > 0 ? 'block' : 'none';
+      leaderEl.replaceChildren(
+        ...shownRows.map((r) => {
+          const row = document.createElement('div');
+          row.className = r.id === myId ? 'lr me' : 'lr';
+          const cell = (cls: string, text: string): HTMLSpanElement => {
+            const s = document.createElement('span');
+            s.className = cls;
+            s.textContent = text;
+            return s;
+          };
+          row.append(cell('n', `${top.indexOf(r) + 1}.`), cell('nm', name(r.id)), cell('sc', String(r.kills)));
+          return row;
+        }),
+      );
+    }
     deadEl.style.display = online && !alive ? 'block' : 'none';
     if (online && !alive) deadSub.textContent = `Respawning in ${(respawnTicks / 60).toFixed(1)} s`;
     scoresEl.style.display = online && input.showScores ? 'block' : 'none';

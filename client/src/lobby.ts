@@ -1,5 +1,8 @@
 import { CLASSES, DEFAULT_PRIMARY, LOBBY, WEAPONS, isPrimary } from '@hitscan/shared';
 import type { MatchInfo, ScoreRow } from '@hitscan/shared';
+import { SECONDARY_WEAPON } from '@hitscan/shared';
+import { careerXp, rankOf } from './career.ts';
+import type { Career } from './career.ts';
 
 const NAME_KEY = 'hitscan.name';
 const AI_KEY = 'hitscan.ai';
@@ -10,7 +13,7 @@ function $(id: string): HTMLElement {
 }
 
 function minutes(seconds: number): string {
-  return `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
+  return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
 }
 
 function make<K extends keyof HTMLElementTagNameMap>(tag: K, className = '', text = ''): HTMLElementTagNameMap[K] {
@@ -19,6 +22,9 @@ function make<K extends keyof HTMLElementTagNameMap>(tag: K, className = '', tex
   if (text) e.textContent = text;
   return e;
 }
+
+const TABS = ['mp', 'ai', 'controls', 'settings'] as const;
+type Tab = (typeof TABS)[number];
 
 export type AiDifficulty = 'easy' | 'normal' | 'hard';
 
@@ -77,6 +83,7 @@ export class LobbyUI {
   private nickEl = $('nick') as HTMLInputElement;
   private buttons: HTMLButtonElement[] = [];
   private joinButtons: HTMLButtonElement[] = [];
+  private tab: Tab = 'mp';
   private connected = false;
   private isError = false;
   private difficulty: AiDifficulty = 'normal';
@@ -89,7 +96,7 @@ export class LobbyUI {
   /** The class picked, as its primary gun (an index into WEAPONS). */
   primary = DEFAULT_PRIMARY;
 
-  constructor(h: LobbyHandlers, volume: number, maps: Array<{ name: string; size: string; players: number }>) {
+  constructor(h: LobbyHandlers, volume: number, maps: Array<{ name: string; size: string; players: number }>, icons: readonly string[] = []) {
     try {
       this.nickEl.value = localStorage.getItem(NAME_KEY) ?? '';
     } catch {
@@ -151,7 +158,7 @@ export class LobbyUI {
 
     // ---- tabs
     for (const btn of Array.from(this.root.querySelectorAll<HTMLButtonElement>('.tab'))) {
-      btn.addEventListener('click', () => this.showTab(btn.dataset.tab === 'ai' ? 'ai' : 'mp'));
+      btn.addEventListener('click', () => this.showTab((TABS as readonly string[]).includes(btn.dataset.tab ?? '') ? (btn.dataset.tab as Tab) : 'mp'));
     }
     $('mp-to-ai').addEventListener('click', () => this.showTab('ai'));
 
@@ -163,13 +170,24 @@ export class LobbyUI {
       // no storage: the default class
     }
     const classButtons: HTMLButtonElement[] = [];
+    const picture = (weapon: number): HTMLImageElement | null => {
+      if (!icons[weapon]) return null;
+      const img = make('img');
+      img.src = icons[weapon];
+      img.alt = '';
+      return img;
+    };
     const showClass = (): void => {
       for (const b of classButtons) b.classList.toggle('on', Number(b.dataset.p) === this.primary);
+      $('class-title').textContent = `${CLASSES.find((c) => c.primary === this.primary)?.name ?? ''} class`;
     };
     for (const c of CLASSES) {
       const b = make('button', 'cls');
       b.dataset.p = String(c.primary);
-      b.append(make('b', '', c.name), make('small', '', c.role), make('span', 'kit', `${WEAPONS[c.primary].name} + Pistol`));
+      const w = WEAPONS[c.primary];
+      b.append(make('b', '', c.name), make('small', '', c.role), make('span', 'kit', `${w.magSize} rounds \u00b7 ${w.damage} dmg`));
+      const img = picture(c.primary);
+      if (img) b.append(img);
       b.addEventListener('click', () => {
         this.primary = c.primary;
         try {
@@ -184,6 +202,12 @@ export class LobbyUI {
       $('class-list').append(b);
     }
     showClass();
+    const side = WEAPONS[SECONDARY_WEAPON];
+    const sideCard = make('div', 'gcard');
+    sideCard.append(make('b', '', side.name), make('small', '', 'Every class carries one'), make('span', 'kit', `${side.magSize} rounds \u00b7 ${side.damage} dmg`));
+    const sideImg = picture(SECONDARY_WEAPON);
+    if (sideImg) sideCard.append(sideImg);
+    $('secondary-card').append(sideCard);
 
     // ---- player
     const commitName = (): void => {
@@ -202,9 +226,11 @@ export class LobbyUI {
         this.nickEl.blur();
       }
     });
-    const slider = $('volume') as HTMLInputElement;
-    slider.value = String(Math.round(volume * 100));
-    slider.addEventListener('input', () => h.onVolume(Number(slider.value) / 100));
+    const slider = document.getElementById('volume') as HTMLInputElement | null; // only on pages that still have a menu volume slider
+    if (slider) {
+      slider.value = String(Math.round(volume * 100));
+      slider.addEventListener('input', () => h.onVolume(Number(slider.value) / 100));
+    }
     this.refresh();
   }
 
@@ -217,11 +243,27 @@ export class LobbyUI {
     for (let n = 1; n <= most; n++) this.aiBots.add(new Option(n === 1 ? '1 bot' : `${n} bots`, String(n), false, n === pick));
   }
 
-  private showTab(tab: 'mp' | 'ai'): void {
-    for (const id of ['mp', 'ai']) {
+  private showTab(tab: Tab): void {
+    this.tab = tab;
+    for (const id of TABS) {
       $(`tab-${id}`).hidden = id !== tab;
       $(`tabbtn-${id}`).classList.toggle('on', id === tab);
     }
+    // The settings controls are one set of elements shared with the pause screen: borrow them while the menu shows them.
+    if (tab === 'settings') $('lobby-settings-slot').append($('settings-body'));
+  }
+
+  /** Fill in the player card under the main panel. */
+  setCareer(c: Career): void {
+    const xp = careerXp(c);
+    const r = rankOf(xp);
+    $('c-rank').textContent = String(r.rank);
+    $('c-xp').textContent = `${r.into.toLocaleString()} / ${r.span.toLocaleString()}`;
+    $('c-xpfill').style.width = `${Math.min(100, (r.into / r.span) * 100)}%`;
+    $('c-kills').textContent = c.kills.toLocaleString();
+    $('c-deaths').textContent = c.deaths.toLocaleString();
+    $('c-kd').textContent = c.deaths > 0 ? (c.kills / c.deaths).toFixed(2) : c.kills > 0 ? c.kills.toFixed(2) : '0.00';
+    $('c-wins').textContent = c.wins.toLocaleString();
   }
 
   get name(): string {
@@ -229,6 +271,7 @@ export class LobbyUI {
   }
 
   show(): void {
+    if (this.root.style.display !== 'flex') this.showTab(this.tab); // takes the settings controls back from the pause screen
     this.root.style.display = 'flex';
   }
 
@@ -313,6 +356,8 @@ export class MatchHud {
   private end = $('endscreen');
   private tag = '';
   private countEl: HTMLElement | null = null;
+  private timeEl: HTMLElement | null = null;
+  private shownKey = '';
 
   /** A small label before the timer, for example "VS AI". Empty for none. */
   setTag(tag: string): void {
@@ -326,10 +371,24 @@ export class MatchHud {
 
   setClock(phase: 'playing' | 'ended', left: number, scoreLimit: number): void {
     this.bar.style.display = 'block';
-    const parts: HTMLElement[] = [];
+    this.bar.className = phase === 'playing' ? '' : 'over';
+    const text = phase === 'playing' ? minutes(left) : '0:00';
+    const goal = phase === 'playing' ? `First to ${scoreLimit} kills` : 'Round over';
+    const key = `${this.tag}|${goal}`;
+    if (this.timeEl && this.shownKey === key) {
+      if (this.timeEl.textContent !== text) this.timeEl.textContent = text;
+      return;
+    }
+    this.shownKey = key;
+    const clock = make('div', 'clock');
+    const ico = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    ico.setAttribute('viewBox', '0 0 16 16');
+    ico.setAttribute('class', 'ico');
+    ico.innerHTML = '<path d="M6 0h4v2H6zM2 3h12v13H2zm2 2v9h8V5zm3 1h2v4H7z" fill="currentColor"/>';
+    this.timeEl = make('span', 't', text);
+    clock.append(ico, this.timeEl);
+    const parts: HTMLElement[] = [clock, make('div', 'g', goal)];
     if (this.tag) parts.push(make('span', 'tag', this.tag));
-    parts.push(make('span', 't', phase === 'playing' ? minutes(left) : '0:00'));
-    parts.push(make('span', 'g', phase === 'playing' ? `First to ${scoreLimit}` : 'Round over'));
     this.bar.replaceChildren(...parts);
   }
 
