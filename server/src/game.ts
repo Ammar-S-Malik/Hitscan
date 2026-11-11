@@ -8,7 +8,7 @@
  * never takes a position from a client. Clients send only inputs.
  */
 import {
-  COMBAT, FireControl, NET, TICK_RATE, createPlayer, pelletDamage, pelletDirections, shotSeed, weaponOf, decodeInputPacket, encodeEvents, encodeReject,
+  COMBAT, FireControl, NET, SECONDARY_WEAPON, TICK_RATE, createPlayer, pelletDamage, pelletDirections, shotSeed, weaponOf, decodeInputPacket, encodeEvents, encodeReject,
   encodeSnapshot, encodeWelcome, eyeHeight, step, traceShot, REJECT_FULL,
 } from '@hitscan/shared';
 import type { Box, GameMap, Input, PlayerState, RemotePlayer, SeqInput, ShotEvent, Spawn, Target } from '@hitscan/shared';
@@ -44,6 +44,7 @@ interface ServerPlayer {
   kills: number;
   deaths: number;
   fire: FireControl;
+  primary: number; // the gun this player's class carries besides the pistol; -1 means no limit
 }
 
 /** Where a player was at the end of one tick, for lag compensation. */
@@ -144,6 +145,7 @@ export class GameServer {
       kills: 0,
       deaths: 0,
       fire: new FireControl(),
+      primary: -1,
     });
     conn.send(encodeWelcome({
       playerId: id,
@@ -154,6 +156,12 @@ export class GameServer {
       mapName: this.map.name,
     }));
     return id;
+  }
+
+  /** Limit a player to the pistol and one primary gun (their class). Inputs naming any other gun are played as the pistol. */
+  setPrimary(id: number, primary: number): void {
+    const p = this.players.get(id);
+    if (p) p.primary = primary;
   }
 
   disconnect(id: number): void {
@@ -210,9 +218,10 @@ export class GameServer {
         while (p.queue.length > 0 && p.budget >= 1 && (applied === 0 || p.queue.length > NET.inputBuffer + 1)) {
           const q = p.queue.shift()!;
           // A dead player can look around but not move or shoot (the client does the same).
-          const input: Input = p.alive
+          let input: Input = p.alive
             ? q.input
             : { ...q.input, forward: 0, strafe: 0, jump: false, sprint: false, slide: false, fire: false };
+          if (p.primary >= 0 && input.weapon !== p.primary && input.weapon !== SECONDARY_WEAPON) input = { ...input, weapon: SECONDARY_WEAPON };
           p.state = step(p.state, input, this.boxes);
           p.lastSeq = q.seq;
           p.yaw = input.yaw;

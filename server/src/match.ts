@@ -70,7 +70,7 @@ export class Match {
   }
 
   /** Add a player. The caller has checked the match is not full. */
-  join(clientId: number, name: string, link: MemberLink): boolean {
+  join(clientId: number, name: string, link: MemberLink, primary = -1): boolean {
     if (this.isFull || this.members.has(clientId)) return false;
     link.sendText({ t: 'joined', match: this.info() }); // first, so the client is ready for the binary welcome that follows
     const playerId = this.server.connect({
@@ -78,6 +78,7 @@ export class Match {
       close: () => this.onKick(clientId, 'You were removed from the match (no input received).'),
     });
     if (playerId === null) return false;
+    if (primary >= 0) this.server.setPrimary(playerId, primary);
     this.members.set(clientId, { clientId, playerId, name, link });
     this.broadcastRoster();
     this.sendClock();

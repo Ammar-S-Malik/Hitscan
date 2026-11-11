@@ -118,3 +118,23 @@ export const WEAPONS: readonly WeaponDef[] = [
   },
 ];
 export const WEAPON_COUNT = WEAPONS.length;
+
+/** Every class carries the pistol as its secondary and one primary gun, which gives the class its name. */
+export const SECONDARY_WEAPON = 0;
+export interface ClassDef {
+  name: string;
+  primary: number; // an index into WEAPONS
+  role: string;
+}
+export const CLASSES: readonly ClassDef[] = [
+  { name: 'Shotgun', primary: 2, role: 'Devastating up close' },
+  { name: 'Rifle', primary: 3, role: 'Dependable at any range' },
+  { name: 'SMG', primary: 1, role: 'Fast firing, hard to pin down' },
+  { name: 'Sniper', primary: 4, role: 'One shot, long range' },
+];
+export const DEFAULT_PRIMARY = 3;
+
+/** True if `v` is the primary gun of one of the classes. */
+export function isPrimary(v: unknown): v is number {
+  return typeof v === 'number' && CLASSES.some((c) => c.primary === v);
+}

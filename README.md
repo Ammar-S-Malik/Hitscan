@@ -12,6 +12,22 @@ The game server runs on a free Render instance that sleeps when idle, so the fir
 lag-compensated hits, five guns with iron sights, a lobby with timed rounds, five validated maps, soldier models,
 synthesized sound, a settings menu, a mini-map, a load test, CI, and deployment files (see `DEPLOY.md`).
 
+## Classes
+
+Pick a class in the lobby. Each is named for its primary gun, and every class also carries the pistol: **Shotgun**, **Rifle**, **SMG**
+and **Sniper**. Key 1 is your primary, key 2 the pistol. The server enforces it (a gun outside your kit fires as the pistol),
+and bots in Play vs AI are given random classes. Your class applies when you join a match. The definitions are `CLASSES` in `shared/src/config.ts`.
+
+## Play vs AI
+
+The lobby has a **Play vs AI** tab: pick a difficulty (Easy, Normal, Hard), 1 to 7 bots, a map, a score limit and a round length,
+then press Start. The whole match runs inside the page, using the same `GameServer` and `Match` code as the real server, so it needs
+no connection (it works while the Render server is still waking up) and has no lag. Pausing with Esc freezes the match.
+
+Bots are ordinary players: they send inputs through the same movement and shot code as you, only see what has a clear line of sight,
+and difficulty only changes reaction time, turn speed, aim error and gun choice. The code is `server/src/bot.ts` (the brain) and
+`server/src/local.ts` (the in-page match); the tests are in `server/test/bots.test.ts`. The visual theme is `client/src/style.css`.
+
 ## Setup (Windows PowerShell)
 
 Needs Node 22.18 or newer (Node 24 LTS is fine). Check with `node -v`.
@@ -70,7 +86,7 @@ last server correction moved you.
 | C | Slide: sprint first, then tap C. Jumping out of a slide keeps your speed |
 | Left click | Shoot (hold for automatic guns; click per shot for the others) |
 | Right click | Aim down sights (hold) |
-| 1 2 3 4 5 / mouse wheel | Pistol, SMG, shotgun, rifle, sniper |
+| 1 / 2 / mouse wheel | Your primary gun / your pistol (see Classes) |
 | Tab | Hold to show the scoreboard |
 | M | Mute / unmute (volume sliders are in the lobby and the pause screen) |
 | R | Respawn (offline only) |

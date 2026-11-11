@@ -1,7 +1,8 @@
 import * as THREE from 'three';
+import './style.css';
 import {
   BODY, DT, FireControl, Interpolator, NET, Predictor, WEAPONS, aimDirection, createPlayer, decodeServerMessage,
-  eyeHeight, isColliding, parseMap, parseServerMessage, pelletDirections, shotSeed, step, traceShot, weaponOf,
+  eyeHeight, isColliding, parseMap, parseServerMessage, pelletDirections, sanitizeName, shotSeed, step, traceShot, weaponOf,
 } from '@hitscan/shared';
 import type { Input, MatchInfo, MatchPhase, PlayerState, RemotePlayer, ShotEvent, Snapshot, Target, Vec3 } from '@hitscan/shared';
 import { GameAudio } from './audio.ts';
@@ -10,8 +11,10 @@ import { MiniMap } from './minimap.ts';
 import type { Ping } from './minimap.ts';
 import { Settings } from './settings.ts';
 import { InputState } from './input.ts';
-import { LobbyUI, MatchHud } from './lobby.ts';
+import { LobbyUI, MatchHud, scoreTable } from './lobby.ts';
+import type { VsAiConfig } from './lobby.ts';
 import { NetClient, parseNetOptions } from './net.ts';
+import { LocalGame } from '../../server/src/local.ts';
 import { ViewModel } from './viewmodel.ts';
 import { buildWorld, disposeWorld } from './world.ts';
 import type { World } from './world.ts';
@@ -124,6 +127,9 @@ function showSettings(open: boolean): void {
   settingsPanel.style.display = open ? '' : 'none';
 }
 document.getElementById('open-settings')?.addEventListener('click', () => showSettings(true));
+document.getElementById('resume')?.addEventListener('click', lockPointer);
+const pauseEyebrow = document.getElementById('pause-eyebrow') as HTMLElement;
+const pauseHint = document.getElementById('pause-hint') as HTMLElement;
 document.getElementById('close-settings')?.addEventListener('click', () => showSettings(false));
 for (const part of [pauseMenu, settingsPanel]) part.addEventListener('click', (e) => e.stopPropagation());
 document.addEventListener('pointerlockchange', () => {
@@ -152,6 +158,10 @@ type Mode = 'connecting' | 'lobby' | 'joining' | 'online' | 'offline' | 'disconn
 let mode: Mode = options.offline ? 'offline' : 'connecting';
 let note = options.offline ? 'offline (?offline in the address)' : `connecting to ${options.url}`;
 let netOpen = false; // is the connection to the server up?
+let local: LocalGame | null = null; // a match running inside the page (Play vs AI); null when playing online or offline
+/** The clock the other players are interpolated against: the match's own clock for a local match, so pausing freezes them too. */
+const arrivalClock = (): number => (local ? local.clockMs : performance.now());
+const viewClock = (): number => (local ? local.now() : performance.now());
 let predictor: Predictor | null = null;
 let interp = new Interpolator(NET.interpDelay);
 const sentAt = new Map<number, number>(); // input number -> when it was sent, to measure the round trip
@@ -178,8 +188,15 @@ const damageEl = el('damage');
 const hpEl = el('hp');
 const healthFill = el('healthfill');
 const killfeedEl = el('killfeed');
+const kdEl = el('kd');
 const scoresEl = el('scores');
 const deadEl = el('dead');
+const deadBig = document.createElement('div');
+deadBig.className = 'big';
+deadBig.textContent = 'Eliminated';
+const deadSub = document.createElement('div');
+deadSub.className = 'sub';
+deadEl.append(deadBig, deadSub);
 const scopeEl = el('scope');
 const crosshairEl = el('crosshair');
 const vignetteEl = el('vignette');
@@ -188,7 +205,17 @@ let shownWeapon = -1;
 let offlineTicks = 0;
 let hitFlash = 0;
 let damageFlash = 0;
-const feed: Array<{ text: string; until: number }> = [];
+interface FeedEntry {
+  killer: string;
+  victim: string;
+  weapon: string;
+  head: boolean;
+  mine: boolean; // we got the kill
+  died: boolean; // we were the victim
+  until: number;
+}
+const feed: FeedEntry[] = [];
+let feedShown = ''; // which entries the kill feed is showing, so it is only rebuilt when it changes
 const stepTracks = new Map<number, { x: number; z: number; dist: number }>(); // footstep sounds for other players
 let myStepDist = 0;
 let lastWeaponHeard = 0;
@@ -278,7 +305,12 @@ function onEvents(events: ShotEvent[]): void {
     }
     if (e.killed) {
       feed.push({
-        text: `${name(e.shooter)}  [${weaponOf(e.weapon).name}]  \u25B8  ${name(e.victim)}${e.headshot ? '  (head)' : ''}`,
+        killer: name(e.shooter),
+        victim: name(e.victim),
+        weapon: weaponOf(e.weapon).name,
+        head: e.headshot,
+        mine: e.shooter === myId,
+        died: e.victim === myId,
         until: now + 5000,
       });
       if (feed.length > 6) feed.shift();
@@ -292,8 +324,10 @@ const lobbyUI = new LobbyUI(
     onQuick: () => net?.sendText({ t: 'quick' }),
     onCreate: (matchName, scoreLimit, timeLimit, mapName) => net?.sendText({ t: 'create', name: matchName, scoreLimit, timeLimit, map: mapName }),
     onJoin: (id) => net?.sendText({ t: 'join', id }),
-    onOffline: (mapName) => goOffline('practising alone (no server)', mapName),
+    onOffline: (mapName) => goOffline('free roam (no enemies)', mapName),
+    onVsAi: (config) => goVsAi(config),
     onNameChange: (n) => net?.sendText({ t: 'hello', name: n }),
+    onClass: (primary) => net?.sendText({ t: 'class', primary }),
     onVolume: (v) => {
       audio.setVolume(v);
       pauseVolume.value = String(Math.round(v * 100));
@@ -305,7 +339,6 @@ const lobbyUI = new LobbyUI(
 );
 lobbyUI.onJoin((id) => net?.sendText({ t: 'join', id }));
 const matchHud = new MatchHud();
-let endAt = 0; // wall-clock time the end-of-round screen counts down to
 
 function updateScreens(): void {
   const showLobby = mode === 'connecting' || mode === 'lobby' || mode === 'disconnected';
@@ -314,6 +347,10 @@ function updateScreens(): void {
   else lobbyUI.hide();
   overlay.style.display = !showLobby && !locked ? 'flex' : 'none';
   lobbyUI.setConnected(netOpen && mode === 'lobby');
+  pauseEyebrow.textContent = local ? 'Paused' : 'Menu';
+  pauseHint.textContent = local
+    ? 'The match is frozen while you are here. Click outside this box, or press Resume.'
+    : 'The match keeps running while this menu is open. Click outside this box to get back in.';
 }
 
 function setMode(next: Mode): void {
@@ -353,7 +390,19 @@ function resetGameState(): void {
   matchHud.hide();
 }
 
+/** Take up the class picked in the lobby: its primary gun on key 1 and the pistol on key 2. */
+function applyLoadout(): void {
+  input.setLoadout(lobbyUI.primary);
+  shownWeapon = -1; // redraw the gun slots
+}
+
+function stopLocal(): void {
+  local = null;
+  matchHud.setTag('');
+}
+
 function backToLobby(message: string, isError = false): void {
+  stopLocal();
   resetGameState();
   if (document.pointerLockElement) document.exitPointerLock();
   setMode(netOpen ? 'lobby' : 'disconnected');
@@ -362,16 +411,49 @@ function backToLobby(message: string, isError = false): void {
 }
 
 function goOffline(reason: string, mapName = ''): void {
+  stopLocal();
   resetGameState();
   setMap(allMaps.find((m) => m.name === mapName) ?? allMaps[Math.floor(Math.random() * allMaps.length)]);
   note = reason;
+  applyLoadout();
   prev = cur = spawn();
   acc = 0;
   setMode('offline');
   lockPointer();
 }
 
+/** Start a match against bots, entirely inside the page. */
+function goVsAi(config: VsAiConfig): void {
+  stopLocal();
+  resetGameState();
+  const roomy = allMaps.filter((m) => m.maxPlayers > config.bots);
+  const pool = roomy.length > 0 ? roomy : allMaps;
+  const chosen = allMaps.find((m) => m.name === config.map) ?? pool[Math.floor(Math.random() * pool.length)];
+  setMap(chosen);
+  note = `vs AI (${config.difficulty})`;
+  acc = 0;
+  applyLoadout();
+  local = new LocalGame(
+    {
+      map: chosen,
+      difficulty: config.difficulty,
+      bots: config.bots,
+      scoreLimit: config.scoreLimit,
+      timeLimit: config.timeLimit,
+      playerName: sanitizeName(lobbyUI.name, 'Player'),
+      primary: lobbyUI.primary,
+    },
+    { onBinary: onGameBytes, onText: onLobbyText },
+  );
+  matchHud.setTag(`vs AI \u00b7 ${config.difficulty}`);
+  local.start(); // sends 'joined' and the welcome straight away, which switches to the joining screen and grabs the mouse
+}
+
 function leaveMatch(): void {
+  if (local) {
+    backToLobby(netOpen ? 'Pick a match.' : 'Not connected to a server.', !netOpen);
+    return;
+  }
   if (mode === 'offline') {
     backToLobby(netOpen ? 'Pick a match.' : 'Not connected to a server.', !netOpen);
     return;
@@ -404,7 +486,7 @@ function onSnapshot(snap: Snapshot): void {
   kills = snap.kills;
   deaths = snap.deaths;
   scoreRows = [{ id: myId, kills: snap.kills, deaths: snap.deaths }, ...snap.others.map((o) => ({ id: o.id, kills: o.kills, deaths: o.deaths }))];
-  interp.push(snap.tick * DT, snap.others, performance.now());
+  interp.push(snap.tick * DT, snap.others, arrivalClock());
 }
 
 function onLobbyText(text: string): void {
@@ -422,8 +504,10 @@ function onLobbyText(text: string): void {
         else note = `this build has no map called "${msg.match.map}"`;
       }
       matchPhase = msg.match.phase;
+      if (!local) matchHud.setTag('');
       matchHud.setClock(msg.match.phase, msg.match.left, msg.match.scoreLimit);
       note = `joined "${msg.match.name}", waiting for the world`;
+      applyLoadout();
       setMode('joining');
       lockPointer(); // works if the click that joined is still recent; otherwise the pause screen asks for a click
       break;
@@ -443,13 +527,12 @@ function onLobbyText(text: string): void {
       }
       matchPhase = msg.phase;
       matchHud.setClock(msg.phase, msg.left, msg.scoreLimit);
+      if (msg.phase === 'ended') matchHud.updateEndCountdown(msg.left);
       break;
     case 'ended': {
       if (mode !== 'joining' && mode !== 'online') break;
       matchPhase = 'ended';
-      const winnerName = msg.rows.find((r) => r.id === msg.winner)?.name ?? '';
-      endAt = performance.now() + msg.nextIn * 1000;
-      matchHud.showEnd(msg.rows, winnerName, myId, msg.nextIn);
+      matchHud.showEnd(msg.rows, msg.winner, myId, msg.nextIn);
       audio.roundEnd(msg.winner === myId);
       break;
     }
@@ -459,6 +542,25 @@ function onLobbyText(text: string): void {
       break;
     case 'hello':
       break;
+  }
+}
+
+/** Binary game messages from the server, or from the match running in this page. */
+function onGameBytes(bytes: Uint8Array): void {
+  if (mode !== 'joining' && mode !== 'online') return;
+  const msg = decodeServerMessage(bytes);
+  if (!msg) return;
+  if (msg.kind === 'welcome') {
+    myId = msg.welcome.playerId;
+    input.yaw = msg.welcome.yaw;
+    input.pitch = 0;
+    if (msg.welcome.mapName !== map.name) note = `server map "${msg.welcome.mapName}" differs from "${map.name}"`;
+  } else if (msg.kind === 'reject') {
+    backToLobby('That match is full.', true);
+  } else if (msg.kind === 'events') {
+    onEvents(msg.events);
+  } else {
+    onSnapshot(msg.snapshot);
   }
 }
 
@@ -472,6 +574,7 @@ const makeNet = (): NetClient =>
         netOpen = true;
         const saved = (document.getElementById('nick') as HTMLInputElement).value;
         net?.sendText({ t: 'hello', name: saved });
+        net?.sendText({ t: 'class', primary: lobbyUI.primary });
         net?.sendText({ t: 'list' });
         if (mode === 'connecting' || mode === 'disconnected') {
           note = 'connected';
@@ -482,45 +585,34 @@ const makeNet = (): NetClient =>
       onClose: () => {
         const wasConnected = netOpen;
         netOpen = false;
-        if (mode === 'offline') {
-          updateScreens();
-          return;
-        }
-        if (!wasConnected && mode === 'connecting' && connectAttempts < MAX_CONNECT_ATTEMPTS) {
+        const playingHere = mode === 'offline' || local !== null; // a match in this page does not need the server
+        const canRetry = !wasConnected && connectAttempts < MAX_CONNECT_ATTEMPTS;
+        if (canRetry && (mode === 'connecting' || mode === 'disconnected' || playingHere)) {
           connectAttempts++;
-          lobbyUI.setStatus(`Waking the server up (free hosting sleeps when idle, this can take a minute). Try ${connectAttempts} of ${MAX_CONNECT_ATTEMPTS}...`);
+          if (!playingHere) {
+            lobbyUI.setStatus(`Waking the server up (free hosting sleeps when idle, this can take a minute). Try ${connectAttempts} of ${MAX_CONNECT_ATTEMPTS}...`);
+          }
           setTimeout(() => {
             net = makeNet();
           }, 5000);
+          updateScreens();
+          return;
+        }
+        if (playingHere) {
+          updateScreens();
           return;
         }
         resetGameState();
         if (document.pointerLockElement) document.exitPointerLock();
         setMode('disconnected');
         lobbyUI.setStatus(
-          wasConnected ? 'Lost the connection to the server. Refresh the page to reconnect.' : `Cannot reach the server at ${options.url}. You can practise alone.`,
+          wasConnected ? 'Lost the connection to the server. Refresh the page to reconnect.' : `Cannot reach the server at ${options.url}. You can still play vs AI.`,
           true,
         );
         lobbyUI.setMatches([], false);
       },
       onText: onLobbyText,
-      onMessage: (bytes) => {
-        if (mode !== 'joining' && mode !== 'online') return;
-        const msg = decodeServerMessage(bytes);
-        if (!msg) return;
-        if (msg.kind === 'welcome') {
-          myId = msg.welcome.playerId;
-          input.yaw = msg.welcome.yaw;
-          input.pitch = 0;
-          if (msg.welcome.mapName !== map.name) note = `server map "${msg.welcome.mapName}" differs from "${map.name}"`;
-        } else if (msg.kind === 'reject') {
-          backToLobby('That match is full.', true);
-        } else if (msg.kind === 'events') {
-          onEvents(msg.events);
-        } else {
-          onSnapshot(msg.snapshot);
-        }
-      },
+      onMessage: onGameBytes,
     });
 let net: NetClient | null = options.offline ? null : makeNet();
 
@@ -610,6 +702,8 @@ function frame(now: number): void {
   }
   fps += (1 / Math.max(frameDt, 1e-6) - fps) * 0.05;
 
+  // A match running in this page pauses along with the menu: nothing moves while the mouse is free.
+  const frozen = local !== null && document.pointerLockElement !== renderer.domElement;
   const respawnPressed = input.takeRespawn();
   if (mode === 'offline') {
     if (respawnPressed || cur.y < -30) {
@@ -625,25 +719,26 @@ function frame(now: number): void {
       if (fireControl.tick(raw.fire, true, raw.weapon)) fireLocal(cur, raw, offlineTicks);
       acc -= DT;
     }
-  } else if (mode === 'online' && predictor && net) {
-    acc += frameDt;
+  } else if (mode === 'online' && predictor && (local || net)) {
+    if (!frozen) acc += frameDt;
     while (acc >= DT) {
       const raw: Input = input.sample();
       // Tell the server which moment of its time our screen was showing other players at, so it can
       // check the shot against where they were then (lag compensation).
-      raw.viewMs = Math.round(interp.sample(performance.now()).renderTime * 1000);
+      raw.viewMs = Math.round(interp.sample(viewClock()).renderTime * 1000);
       const packet = predictor.tick(raw);
       const used = predictor.lastInput;
       if (used && fireControl.tick(used.fire && matchPhase === 'playing', predictor.alive, used.weapon)) fireLocal(predictor.cur, used, predictor.lastSeq);
       sentAt.set(predictor.lastSeq, performance.now());
       if (sentAt.size > 300) sentAt.delete(sentAt.keys().next().value as number);
-      net.send(packet);
+      (local ?? net)?.send(packet);
       acc -= DT;
     }
-    predictor.smoothErrors(frameDt);
-    lastRemotes = interp.sample(performance.now()).players;
-    updateRemotes(lastRemotes, frameDt);
+    predictor.smoothErrors(frozen ? 0 : frameDt);
+    lastRemotes = interp.sample(viewClock()).players;
+    updateRemotes(lastRemotes, frozen ? 0 : frameDt);
   }
+  if (local && !frozen) local.advance(frameDt);
 
   // Which state to draw: the predictor's once online, otherwise the local one.
   const live = (mode === 'online' || mode === 'disconnected') && predictor !== null;
@@ -729,12 +824,12 @@ function frame(now: number): void {
   if (shownWeapon !== input.weapon) {
     shownWeapon = input.weapon;
     weaponsEl.replaceChildren(
-      ...WEAPONS.map((w, i) => {
+      ...input.slots.map((w, i) => {
         const slot = document.createElement('div');
-        slot.className = i === input.weapon ? 'slot on' : 'slot';
+        slot.className = w === input.weapon ? 'slot on' : 'slot';
         const key = document.createElement('b');
         key.textContent = String(i + 1);
-        slot.append(key, w.name);
+        slot.append(key, WEAPONS[w].name);
         return slot;
       }),
     );
@@ -754,7 +849,6 @@ function frame(now: number): void {
   hudTimer -= frameDt;
   if (hudTimer <= 0) {
     hudTimer = 0.1;
-    if (matchPhase === 'ended' && mode === 'online') matchHud.updateEndCountdown((endAt - performance.now()) / 1000);
     const speed = Math.hypot(drawCur.vx, drawCur.vz);
     const slide = drawCur.sliding ? 'SLIDING' : drawCur.slideCooldown > 0 ? `cooldown ${drawCur.slideCooldown.toFixed(1)}s` : 'ready';
     let netText: string;
@@ -768,21 +862,52 @@ function frame(now: number): void {
     } else {
       netText = `net    ${note}\n`;
     }
+    if (local && mode === 'online') netText = `net    vs AI, running in this page (no network)\n`;
     const wallNow = performance.now();
     while (feed.length > 0 && feed[0].until < wallNow) feed.shift();
-    killfeedEl.textContent = feed.map((f) => f.text).join('\n');
+    const feedKey = feed.map((f) => f.until).join(',');
+    if (feedKey !== feedShown) {
+      feedShown = feedKey;
+      killfeedEl.replaceChildren(
+        ...feed.map((f) => {
+          const row = document.createElement('div');
+          row.className = `kf${f.mine ? ' mine' : ''}${f.died ? ' died' : ''}`;
+          const add = (cls: string, text: string): void => {
+            const s = document.createElement('span');
+            if (cls) s.className = cls;
+            s.textContent = text;
+            row.append(s);
+          };
+          add(f.mine ? 'me' : '', f.killer);
+          add('w', f.weapon);
+          add('arrow', '\u25B8');
+          add(f.died ? 'me' : '', f.victim);
+          if (f.head) add('head', 'HEAD');
+          return row;
+        }),
+      );
+    }
     const online = mode === 'online';
     hpEl.textContent = online ? `${health}` : '';
+    kdEl.replaceChildren();
+    if (online) {
+      const k = document.createElement('b');
+      k.textContent = String(kills);
+      const d = document.createElement('b');
+      d.textContent = String(deaths);
+      kdEl.append('KILLS ', k, '   DEATHS ', d);
+    }
     healthFill.style.width = `${online ? health : 100}%`;
-    healthFill.style.background = health > 60 ? '#5ad17a' : health > 30 ? '#e6c449' : '#e5533d';
+    healthFill.style.background = health > 60 ? '#4ade80' : health > 30 ? '#ffc533' : '#ff4d4d';
     deadEl.style.display = online && !alive ? 'block' : 'none';
-    if (online && !alive) deadEl.textContent = `Eliminated. Respawning in ${(respawnTicks / 60).toFixed(1)} s`;
+    if (online && !alive) deadSub.textContent = `Respawning in ${(respawnTicks / 60).toFixed(1)} s`;
     scoresEl.style.display = online && input.showScores ? 'block' : 'none';
     if (online && input.showScores) {
       const rows = [...scoreRows].sort((a, b) => b.kills - a.kills || a.deaths - b.deaths);
-      scoresEl.textContent =
-        'PLAYER            KILLS  DEATHS\n' +
-        rows.map((r) => `${name(r.id).padEnd(16)}  ${String(r.kills).padStart(5)}  ${String(r.deaths).padStart(6)}`).join('\n');
+      const title = document.createElement('div');
+      title.className = 'sb-title';
+      title.textContent = 'Scoreboard';
+      scoresEl.replaceChildren(title, scoreTable(rows.map((r) => ({ name: name(r.id), kills: r.kills, deaths: r.deaths, me: r.id === myId }))));
     }
     hud.textContent =
       `speed  ${speed.toFixed(1)} m/s\n` +

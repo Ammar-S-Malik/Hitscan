@@ -3,90 +3,9 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#080b10" />
     <title>Hitscan</title>
-    <style>
-      html, body { margin: 0; height: 100%; overflow: hidden; background: #101418; font-family: system-ui, sans-serif; }
-      canvas { display: block; }
-      #hud { position: fixed; left: 12px; top: 12px; color: #e8eef5; font: 13px/1.5 ui-monospace, Consolas, monospace;
-             text-shadow: 0 1px 2px #000; pointer-events: none; white-space: pre; }
-      #crosshair { position: fixed; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px;
-                   border-radius: 50%; background: rgba(255,255,255,.85); box-shadow: 0 0 0 1px rgba(0,0,0,.6); pointer-events: none; }
-      #hitmarker { position: fixed; left: 50%; top: 50%; width: 28px; height: 28px; margin: -14px 0 0 -14px; opacity: 0;
-                   pointer-events: none; --c: #fff; }
-      #hitmarker::before, #hitmarker::after { content: ''; position: absolute; left: 50%; top: 50%; width: 3px; height: 28px;
-                   margin: -14px 0 0 -1.5px; background: var(--c); box-shadow: 0 0 0 1px rgba(0,0,0,.5); }
-      #hitmarker::before { transform: rotate(45deg); }
-      #hitmarker::after { transform: rotate(-45deg); }
-      #damage { position: fixed; inset: 0; opacity: 0; pointer-events: none;
-                background: radial-gradient(ellipse at center, rgba(180,0,0,0) 45%, rgba(200,0,0,.75) 100%); }
-      #vitals { position: fixed; left: 16px; bottom: 16px; color: #fff; font: 600 22px/1 ui-monospace, Consolas, monospace;
-                text-shadow: 0 1px 3px #000; pointer-events: none; }
-      #healthbar { width: 220px; height: 10px; margin-top: 8px; background: rgba(0,0,0,.5); border-radius: 5px; overflow: hidden; }
-      #healthfill { height: 100%; width: 100%; background: #5ad17a; }
-      #killfeed { position: fixed; right: 14px; top: 12px; text-align: right; color: #fff; font: 14px/1.7 ui-monospace, Consolas, monospace;
-                  text-shadow: 0 1px 3px #000; pointer-events: none; white-space: pre; }
-      #scores { position: fixed; left: 50%; top: 18%; transform: translateX(-50%); min-width: 320px; padding: 12px 18px; display: none;
-                background: rgba(10,12,16,.72); border-radius: 8px; color: #fff; font: 14px/1.7 ui-monospace, Consolas, monospace;
-                pointer-events: none; white-space: pre; }
-      #dead { position: fixed; left: 50%; top: 38%; transform: translateX(-50%); display: none; text-align: center; color: #fff;
-              font-size: 22px; text-shadow: 0 2px 6px #000; pointer-events: none; }
-      #vignette { position: fixed; inset: 0; pointer-events: none; opacity: 0;
-        background: radial-gradient(ellipse at center, rgba(0,0,0,0) 45%, rgba(0,0,0,0.55) 100%); }
-      #scope { position: fixed; inset: 0; display: none; pointer-events: none;
-               background: radial-gradient(circle at center, rgba(0,0,0,0) 0, rgba(0,0,0,0) 36vh, #000 36.4vh); }
-      #scope::before, #scope::after { content: ''; position: absolute; background: rgba(0,0,0,.85); }
-      #scope::before { left: 50%; top: calc(50% - 36vh); width: 2px; height: 72vh; margin-left: -1px; }
-      #scope::after { top: 50%; left: calc(50% - 36vh); height: 2px; width: 72vh; margin-top: -1px; }
-      #weapons { position: fixed; right: 16px; bottom: 16px; display: flex; gap: 6px; pointer-events: none; }
-      .slot { min-width: 64px; padding: 6px 8px; border-radius: 6px; background: rgba(10,12,16,.55); color: #aab4c0;
-              font: 12px/1.3 ui-monospace, Consolas, monospace; text-align: center; border: 1px solid rgba(255,255,255,.08); }
-      .slot b { display: block; font-size: 15px; color: #fff; }
-      .slot.on { background: rgba(255,255,255,.88); color: #1b1f24; border-color: #fff; }
-      .slot.on b { color: #000; }
-      #lobby { position: fixed; inset: 0; z-index: 20; display: none; align-items: center; justify-content: center; overflow: auto;
-               background: rgba(10,12,16,.82); color: #e8eef5; }
-      #lobby .card { width: min(720px, 94vw); max-height: 94vh; overflow: auto; padding: 22px 26px; border-radius: 12px;
-                     background: #151a21; box-shadow: 0 10px 40px rgba(0,0,0,.5); }
-      #lobby h1 { margin: 0 0 2px; letter-spacing: .2em; font-size: 28px; }
-      #lobby h2 { margin: 18px 0 8px; font-size: 13px; letter-spacing: .12em; color: #8fa0b3; text-transform: uppercase; }
-      #lobby .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 8px 0; }
-      #lobby label { font-size: 13px; color: #aab4c0; display: flex; gap: 6px; align-items: center; }
-      #lobby input[type=text], #lobby select { background: #0e1217; color: #fff; border: 1px solid #2a323c; border-radius: 6px; padding: 7px 9px; font: inherit; }
-      #lobby #nick { width: 170px; }
-      #lobby #mname { width: 190px; }
-      button { background: #3b82f6; color: #fff; border: 0; border-radius: 6px; padding: 8px 14px; font: 600 14px system-ui; cursor: pointer; }
-      button:hover { background: #5a98f8; }
-      button:disabled { background: #2a323c; color: #6b7684; cursor: default; }
-      button.ghost { background: #2a323c; }
-      button.ghost:hover { background: #38424f; }
-      #lobby-status { margin: 4px 0 6px; min-height: 20px; font-size: 14px; color: #8fa0b3; }
-      #lobby-status.error { color: #ff8a80; }
-      #matchlist { display: grid; gap: 6px; }
-      .match { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; align-items: center; padding: 9px 12px; background: #0e1217; border-radius: 8px; }
-      .match small { color: #8fa0b3; display: block; }
-      .empty { color: #6b7684; font-size: 14px; padding: 6px 2px; }
-      #matchbar { position: fixed; left: 50%; top: 10px; transform: translateX(-50%); display: none; padding: 5px 14px; border-radius: 6px;
-                  background: rgba(10,12,16,.55); color: #fff; font: 600 15px ui-monospace, Consolas, monospace; pointer-events: none; }
-      #endscreen { position: fixed; left: 50%; top: 20%; transform: translateX(-50%); display: none; min-width: 380px; padding: 16px 22px;
-                   border-radius: 10px; background: rgba(10,12,16,.82); color: #fff; font: 15px/1.7 ui-monospace, Consolas, monospace;
-                   pointer-events: none; white-space: pre; text-align: left; }
-      #endscreen b { font-size: 20px; }
-      #pause-actions { margin-top: 14px; display: flex; gap: 12px; justify-content: center; align-items: center; }
-      #pause-actions label { font-size: 13px; color: #cfd8e3; display: flex; gap: 6px; align-items: center; }
-      #minimap { position: fixed; right: 12px; top: 12px; display: none; border-radius: 6px; pointer-events: none; }
-      #pause-menu .hint, #controls-list { color: #cfd8e3; font-size: 13px; }
-      #controls-list { margin: 10px 0 4px; line-height: 2; }
-      #settings-back { margin-top: 16px; }
-      #settings-panel, #pause-menu { cursor: default; }
-      #settings { margin: 14px auto 0; display: grid; grid-template-columns: auto auto; gap: 6px 18px; justify-content: center; text-align: left;
-                  font-size: 13px; color: #cfd8e3; cursor: default; }
-      #settings label { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
-      #settings span { min-width: 38px; text-align: right; font-family: ui-monospace, Consolas, monospace; }
-      #overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center;
-                 color: #fff; background: rgba(10,12,16,.6); cursor: pointer; font-size: 16px; line-height: 1.8; }
-      #overlay b { font-size: 24px; }
-      kbd { background: #2a323c; border-radius: 4px; padding: 1px 6px; font-family: inherit; }
-    </style>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23080b10'/%3E%3Ccircle cx='16' cy='16' r='8' fill='none' stroke='%23ff6a3a' stroke-width='2.4'/%3E%3Cpath d='M16 3v8M16 21v8M3 16h8M21 16h8' stroke='%23ff6a3a' stroke-width='2.4'/%3E%3C/svg%3E" />
   </head>
   <body>
     <div id="hud"></div>
@@ -97,63 +16,138 @@
     <div id="weapons"></div>
     <div id="hitmarker"></div>
     <div id="damage"></div>
-    <div id="vitals"><div id="hp"></div><div id="healthbar"><div id="healthfill"></div></div></div>
+    <div id="vitals">
+      <div class="hp-row"><span id="hp"></span><span class="hp-unit">HP</span></div>
+      <div id="healthbar"><div id="healthfill"></div></div>
+      <div id="kd"></div>
+    </div>
     <div id="killfeed"></div>
     <div id="scores"></div>
     <div id="dead"></div>
+
     <div id="lobby">
-      <div class="card">
-        <h1>HITSCAN</h1>
-        <div id="lobby-status"></div>
-        <div class="row">
-          <label>Nickname <input type="text" id="nick" maxlength="16" autocomplete="off" spellcheck="false" /></label>
-          <button id="quick">Quick play</button>
-        </div>
-        <h2>Open matches</h2>
-        <div id="matchlist"></div>
-        <h2>Create a match</h2>
-        <div class="row">
-          <input type="text" id="mname" maxlength="24" placeholder="Match name (optional)" autocomplete="off" />
-          <label>Map <select id="mmap"></select></label>
-          <label>First to <select id="mscore"></select> kills</label>
-          <label>Round <select id="mtime"></select></label>
-          <button id="create">Create</button>
-        </div>
-        <div class="row">
-          <button id="offline" class="ghost">Practice alone (offline)</button>
-          <label>Volume <input type="range" id="volume" min="0" max="100" /></label>
+      <div class="shell">
+        <header class="topbar">
+          <div class="brand">
+            <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
+              <circle cx="16" cy="16" r="8.5" fill="none" stroke="currentColor" stroke-width="2.2" />
+              <path d="M16 2v9M16 21v9M2 16h9M21 16h9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" />
+              <circle cx="16" cy="16" r="1.7" fill="currentColor" />
+            </svg>
+            <span class="word">Hitscan</span>
+          </div>
+          <div class="status" id="status-pill"><i class="dot"></i><span id="lobby-status"></span></div>
+        </header>
+
+        <div class="layout">
+          <aside class="panel profile">
+            <h3>Player</h3>
+            <label class="field">Nickname
+              <input type="text" id="nick" maxlength="16" autocomplete="off" spellcheck="false" placeholder="Choose a name" />
+            </label>
+            <label class="field">Volume
+              <input type="range" id="volume" min="0" max="100" />
+            </label>
+            <h3>Class</h3>
+            <div id="class-list" class="classes"></div>
+            <p class="fine">Every class also carries a pistol. Your class applies when you join a match.</p>
+            <h3>Controls</h3>
+            <ul class="keys">
+              <li>Move <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span></li>
+              <li>Look <span><kbd>Mouse</kbd></span></li>
+              <li>Shoot / Aim <span><kbd>LMB</kbd><kbd>RMB</kbd></span></li>
+              <li>Jump / Sprint <span><kbd>Space</kbd><kbd>Shift</kbd></span></li>
+              <li>Slide <span><kbd>C</kbd></span></li>
+              <li>Primary / Pistol <span><kbd>1</kbd><kbd>2</kbd></span></li>
+              <li>Scoreboard <span><kbd>Tab</kbd></span></li>
+              <li>Pause <span><kbd>Esc</kbd></span></li>
+            </ul>
+          </aside>
+
+          <main class="panel stage">
+            <div class="tabs" role="tablist">
+              <button class="tab on" id="tabbtn-mp" data-tab="mp" role="tab">Multiplayer</button>
+              <button class="tab" id="tabbtn-ai" data-tab="ai" role="tab">Play vs AI</button>
+            </div>
+
+            <section id="tab-mp" class="tabpane">
+              <div id="mp-note" class="note" hidden>
+                <span id="mp-note-text"></span>
+                <button class="link" id="mp-to-ai">Play vs AI in the meantime</button>
+              </div>
+              <div class="hero">
+                <button id="quick" class="primary big">Quick play<small>Jump straight into a match with other players</small></button>
+              </div>
+              <h3>Open matches</h3>
+              <div id="matchlist"></div>
+              <h3>Create a match</h3>
+              <div class="row create">
+                <input type="text" id="mname" maxlength="24" placeholder="Match name (optional)" autocomplete="off" />
+                <label>Map <select id="mmap"></select></label>
+                <label>First to <select id="mscore"></select></label>
+                <label>Round <select id="mtime"></select></label>
+                <button id="create">Create</button>
+              </div>
+            </section>
+
+            <section id="tab-ai" class="tabpane" hidden>
+              <h3>Difficulty</h3>
+              <div class="seg" id="ai-diff">
+                <button data-v="easy"><b>Easy</b><small>Slow to react, misses often</small></button>
+                <button data-v="normal"><b>Normal</b><small>A fair fight for most players</small></button>
+                <button data-v="hard"><b>Hard</b><small>Fast, accurate, goes for headshots</small></button>
+              </div>
+              <h3>Match</h3>
+              <div class="grid">
+                <label>Opponents <select id="ai-bots"></select></label>
+                <label>Map <select id="ai-map"></select></label>
+                <label>First to <select id="ai-score"></select></label>
+                <label>Round length <select id="ai-time"></select></label>
+              </div>
+              <div class="actions">
+                <button id="ai-start" class="primary big">Start match</button>
+                <button id="offline" class="ghost">Free roam (no enemies)</button>
+              </div>
+              <p class="fine">Everything runs in your browser, so it works without the server and with no lag. Pausing freezes the match.</p>
+            </section>
+          </main>
         </div>
       </div>
     </div>
+
     <div id="matchbar"></div>
     <div id="endscreen"></div>
+
     <div id="overlay">
-      <div id="pause-menu">
-        <b>Paused</b><br />
-        <span class="hint">Click anywhere else to get back in the game</span>
+      <div id="pause-menu" class="card">
+        <div class="eyebrow" id="pause-eyebrow">Paused</div>
+        <h2>Click to play</h2>
+        <p class="hint" id="pause-hint">Click anywhere outside this box to get back in the game.</p>
         <div id="pause-actions">
-          <button id="leave" class="ghost">Leave match</button>
-          <button id="open-settings">Settings</button>
+          <button id="resume" class="primary">Resume</button>
+          <button id="open-settings" class="ghost">Settings</button>
+          <button id="leave" class="ghost danger">Leave match</button>
         </div>
       </div>
-      <div id="settings-panel" style="display: none">
-        <b>Settings</b>
+      <div id="settings-panel" class="card" style="display: none">
+        <div class="eyebrow">Options</div>
+        <h2>Settings</h2>
         <div id="controls-list">
           <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move &nbsp; <kbd>Mouse</kbd> look &nbsp; <kbd>Space</kbd> jump<br />
-          <kbd>Shift</kbd> sprint &nbsp; <kbd>C</kbd> slide (sprint first, then tap C) &nbsp; <kbd>R</kbd> respawn (offline)<br />
-          <kbd>Left click</kbd> shoot &nbsp; <kbd>Right click</kbd> aim &nbsp; <kbd>1</kbd>-<kbd>5</kbd> or <kbd>Wheel</kbd> change gun<br />
+          <kbd>Shift</kbd> sprint &nbsp; <kbd>C</kbd> slide (sprint first) &nbsp; <kbd>R</kbd> respawn (free roam)<br />
+          <kbd>LMB</kbd> shoot &nbsp; <kbd>RMB</kbd> aim &nbsp; <kbd>1</kbd> <kbd>2</kbd> / <kbd>Wheel</kbd> swap gun<br />
           <kbd>Tab</kbd> scoreboard &nbsp; <kbd>M</kbd> mute &nbsp; <kbd>Esc</kbd> pause
         </div>
         <div id="settings">
-          <label>Volume <input type="range" id="volume2" min="0" max="100" /><span id="volume2-v"></span></label>
-          <label>Mouse sensitivity <input type="range" id="set-sens" min="20" max="300" /><span id="set-sens-v"></span></label>
-          <label>Field of view <input type="range" id="set-fov" min="60" max="110" /><span id="set-fov-v"></span></label>
-          <label><span></span><span><input type="checkbox" id="set-xhair" /> Crosshair</span></label>
-          <label><span></span><span><input type="checkbox" id="set-map" /> Mini-map</span></label>
-          <label><span></span><span><input type="checkbox" id="set-dbg" /> Debug readout</span></label>
-          <label><span></span><span><input type="checkbox" id="set-shadows" /> Shadows</span></label>
+          <div class="row"><span>Volume</span><span class="ctl"><input type="range" id="volume2" min="0" max="100" /><span class="val" id="volume2-v"></span></span></div>
+          <div class="row"><span>Mouse sensitivity</span><span class="ctl"><input type="range" id="set-sens" min="20" max="300" /><span class="val" id="set-sens-v"></span></span></div>
+          <div class="row"><span>Field of view</span><span class="ctl"><input type="range" id="set-fov" min="60" max="110" /><span class="val" id="set-fov-v"></span></span></div>
+          <div class="row"><span>Crosshair</span><input type="checkbox" id="set-xhair" /></div>
+          <div class="row"><span>Mini-map</span><input type="checkbox" id="set-map" /></div>
+          <div class="row"><span>Debug readout</span><input type="checkbox" id="set-dbg" /></div>
+          <div class="row"><span>Shadows</span><input type="checkbox" id="set-shadows" /></div>
         </div>
-        <div id="settings-back"><button id="close-settings" class="ghost">Back</button></div>
+        <button id="close-settings" class="ghost">Back</button>
       </div>
     </div>
     <script type="module" src="/src/main.ts"></script>

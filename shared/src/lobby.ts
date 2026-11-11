@@ -4,6 +4,8 @@
  * frames. Both sides validate everything they receive: a message that does not fit is ignored.
  */
 
+import { isPrimary } from './config.ts';
+
 export const LOBBY = {
   nameMax: 16,
   matchNameMax: 24,
@@ -40,6 +42,7 @@ export interface ScoreRow {
 
 export type ClientMsg =
   | { t: 'hello'; name: string }
+  | { t: 'class'; primary: number } // the class (named for its primary gun) to join matches with
   | { t: 'list' }
   | { t: 'create'; name: string; scoreLimit: number; timeLimit: number; map: string } // map '' = pick one at random
   | { t: 'join'; id: number }
@@ -93,6 +96,8 @@ export function parseClientMessage(text: string): ClientMsg | null {
   switch (raw.t) {
     case 'hello':
       return { t: 'hello', name: sanitizeName(raw.name, '') };
+    case 'class':
+      return isPrimary(raw.primary) ? { t: 'class', primary: raw.primary } : null;
     case 'list':
       return { t: 'list' };
     case 'create':

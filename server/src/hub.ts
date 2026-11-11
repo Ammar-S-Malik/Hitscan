@@ -2,7 +2,7 @@
  * The hub: every connected client, the lobby conversation, and the matches. Like GameServer it has no
  * networking of its own (the thin adapter in main.ts feeds it bytes and text), so tests drive it directly.
  */
-import { LOBBY, TICK_RATE, parseClientMessage, sanitizeName } from '@hitscan/shared';
+import { DEFAULT_PRIMARY, LOBBY, TICK_RATE, parseClientMessage, sanitizeName } from '@hitscan/shared';
 import type { GameMap, MatchInfo, ServerMsg } from '@hitscan/shared';
 import { LIMITS, TickBucket } from './limits.ts';
 import { Match } from './match.ts';
@@ -24,6 +24,7 @@ interface Client {
   conn: HubConnection;
   ip: string;
   name: string | null; // null until the client has said hello
+  primary: number; // the class it will join matches as
   match: Match | null;
   gameBucket: TickBucket;
   textBucket: TickBucket;
@@ -72,7 +73,7 @@ export class Hub {
     }
     const id = this.nextClientId++;
     this.clients.set(id, {
-      id, conn, ip, name: null, match: null,
+      id, conn, ip, name: null, primary: DEFAULT_PRIMARY, match: null,
       gameBucket: new TickBucket(LIMITS.gameBurst, LIMITS.gamePerSecond, TICK_RATE),
       textBucket: new TickBucket(LIMITS.textBurst, LIMITS.textPerSecond, TICK_RATE),
       strikes: 0,
@@ -116,6 +117,10 @@ export class Hub {
       c.name = sanitizeName(msg.name, `Player ${c.id}`);
       this.say(c, { t: 'hello', name: c.name });
       this.say(c, { t: 'matches', list: this.list() });
+      return;
+    }
+    if (msg.t === 'class') {
+      c.primary = msg.primary; // takes effect the next time it joins a match
       return;
     }
     if (c.name === null) {
@@ -220,7 +225,7 @@ export class Hub {
     const joined = m.join(c.id, c.name ?? `Player ${c.id}`, {
       send: (bytes) => c.conn.send(bytes),
       sendText: (msg) => this.say(c, msg),
-    });
+    }, c.primary);
     if (joined) c.match = m;
     else this.say(c, { t: 'error', message: 'Could not join that match.' });
     if (m.size === 0) this.matches.delete(m.id);

@@ -9,7 +9,7 @@ export interface SettingsValues {
 }
 
 const KEY = 'hitscan.settings';
-const DEFAULTS: SettingsValues = { sensitivity: 1, fov: 75, crosshair: true, minimap: true, debug: true, shadows: true };
+const DEFAULTS: SettingsValues = { sensitivity: 1, fov: 75, crosshair: true, minimap: true, debug: false, shadows: true };
 
 function clamp(v: unknown, lo: number, hi: number, fallback: number): number {
   return typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : fallback;
@@ -20,13 +20,13 @@ export class Settings {
 
   constructor() {
     try {
-      const raw = JSON.parse(localStorage.getItem(KEY) ?? '{}') as Partial<Record<keyof SettingsValues, unknown>>;
+      const raw = JSON.parse(localStorage.getItem(KEY) ?? '{}') as Partial<Record<keyof SettingsValues | 'v', unknown>>;
       this.values = {
         sensitivity: clamp(raw.sensitivity, 0.2, 3, DEFAULTS.sensitivity),
         fov: clamp(raw.fov, 60, 110, DEFAULTS.fov),
         crosshair: typeof raw.crosshair === 'boolean' ? raw.crosshair : DEFAULTS.crosshair,
         minimap: typeof raw.minimap === 'boolean' ? raw.minimap : DEFAULTS.minimap,
-        debug: typeof raw.debug === 'boolean' ? raw.debug : DEFAULTS.debug,
+        debug: raw.v === 2 && typeof raw.debug === 'boolean' ? raw.debug : DEFAULTS.debug, // the readout is off by default; older saves had it on
         shadows: typeof raw.shadows === 'boolean' ? raw.shadows : DEFAULTS.shadows,
       };
     } catch {
@@ -36,7 +36,7 @@ export class Settings {
 
   private save(): void {
     try {
-      localStorage.setItem(KEY, JSON.stringify(this.values));
+      localStorage.setItem(KEY, JSON.stringify({ ...this.values, v: 2 }));
     } catch {
       // not saved this time; the settings still apply until the page closes
     }

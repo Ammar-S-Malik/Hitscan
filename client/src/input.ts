@@ -1,4 +1,4 @@
-import { WEAPON_COUNT } from '@hitscan/shared';
+import { DEFAULT_PRIMARY, SECONDARY_WEAPON } from '@hitscan/shared';
 import type { Input } from '@hitscan/shared';
 
 const SENSITIVITY = 0.0022; // radians per mouse pixel
@@ -27,8 +27,10 @@ export class InputState {
   private fireLatch = false;
   /** Right mouse button: aiming down sights. */
   aimHeld = false;
-  /** The gun that is out: an index into WEAPONS. Keys 1-5 or the mouse wheel change it. */
-  weapon = 0;
+  /** The guns this class carries, in key order: key 1 is the primary, key 2 the pistol. */
+  slots: number[] = [DEFAULT_PRIMARY, SECONDARY_WEAPON];
+  /** The gun that is out: an index into WEAPONS. Keys 1 and 2 or the mouse wheel change it. */
+  weapon = DEFAULT_PRIMARY;
   /** Mouse movement is scaled by this, so aiming through a zoomed view is not twitchy. */
   sensitivityScale = 1;
   /** True while Tab is held: the scoreboard is shown. */
@@ -48,7 +50,7 @@ export class InputState {
       if (e.code === 'KeyC') this.slideLatch = true;
       if (e.code === 'KeyR') this.respawnLatch = true;
       const digit = e.code.startsWith('Digit') ? Number(e.code.slice(5)) : 0;
-      if (digit >= 1 && digit <= WEAPON_COUNT) this.weapon = digit - 1;
+      if (digit >= 1 && digit <= this.slots.length) this.weapon = this.slots[digit - 1];
     });
     window.addEventListener('keyup', (e) => {
       this.keys.delete(e.code);
@@ -80,7 +82,8 @@ export class InputState {
     window.addEventListener('wheel', (e) => {
       if (document.pointerLockElement !== this.canvas || e.deltaY === 0) return;
       const step = e.deltaY > 0 ? 1 : -1;
-      this.weapon = (this.weapon + step + WEAPON_COUNT) % WEAPON_COUNT;
+      const at = Math.max(0, this.slots.indexOf(this.weapon));
+      this.weapon = this.slots[(at + step + this.slots.length) % this.slots.length];
     }, { passive: true });
 
     document.addEventListener('mousemove', (e) => {
@@ -126,6 +129,12 @@ export class InputState {
     this.slideLatch = false;
     this.fireLatch = false;
     return input;
+  }
+
+  /** Take up a class: its primary gun in slot 1, the pistol in slot 2, with the primary in hand. */
+  setLoadout(primary: number): void {
+    this.slots = [primary, SECONDARY_WEAPON];
+    this.weapon = primary;
   }
 
   /** Kick the view up, as recoil does. */
