@@ -18,7 +18,10 @@ import { LocalGame } from '../../server/src/local.ts';
 import { ViewModel } from './viewmodel.ts';
 import { reloadCues } from './reloadpose.ts';
 import { renderGunIcons } from './gunicons.ts';
-import { loadCareer, saveCareer } from './career.ts';
+import { hasCareer, loadCareer, mergeCareer, saveCareer, toCareer } from './career.ts';
+import { Account } from './account.ts';
+import type { Profile } from './account.ts';
+import { AccountUI } from './accountui.ts';
 import { buildWorld, disposeWorld } from './world.ts';
 import type { World } from './world.ts';
 
@@ -325,8 +328,7 @@ function onEvents(events: ShotEvent[]): void {
         if (e.headshot) career.headshots++;
       }
       if (e.victim === myId) career.deaths++;
-      saveCareer(career);
-      lobbyUI.setCareer(career);
+      careerChanged();
     }
     if (e.killed) {
       feed.push({
@@ -352,8 +354,14 @@ const lobbyUI = new LobbyUI(
     onJoin: (id) => net?.sendText({ t: 'join', id }),
     onOffline: (mapName) => goOffline('free roam (no enemies)', mapName),
     onVsAi: (config) => goVsAi(config),
-    onNameChange: (n) => net?.sendText({ t: 'hello', name: n }),
-    onClass: (primary) => net?.sendText({ t: 'class', primary }),
+    onNameChange: (n) => {
+      net?.sendText({ t: 'hello', name: n });
+      if (account.user) void account.saveProfile({ nickname: n }).catch(() => {});
+    },
+    onClass: (primary) => {
+      net?.sendText({ t: 'class', primary });
+      if (account.user) void account.saveProfile({ primary }).catch(() => {});
+    },
     onVolume: (v) => {
       audio.setVolume(v);
       pauseVolume.value = String(Math.round(v * 100));
@@ -364,8 +372,63 @@ const lobbyUI = new LobbyUI(
   allMaps.map((m) => ({ name: m.name, size: m.size, players: m.maxPlayers })),
   gunIcons,
 );
-const career = loadCareer();
+// ---- lifetime stats, and the optional account that keeps them in the cloud
+const account = new Account();
+const accountUI = new AccountUI(account);
+let careerUid: string | undefined; // the signed-in account the stats on screen belong to; undefined for a guest
+let career = loadCareer();
 lobbyUI.setCareer(career);
+let cloudTimer = 0;
+/** Save the stats to the account soon (batched, so a burst of kills is one write). */
+function saveToCloud(delayMs = 4000): void {
+  if (!careerUid) return;
+  clearTimeout(cloudTimer);
+  cloudTimer = window.setTimeout(() => {
+    void account.saveProfile({ career }).catch(() => {
+      // offline: this browser keeps the totals, and they are merged in next time
+    });
+  }, delayMs);
+}
+function careerChanged(): void {
+  saveCareer(career, careerUid);
+  lobbyUI.setCareer(career);
+  saveToCloud();
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden' && careerUid) saveToCloud(0);
+});
+account.onChange((u) => {
+  accountUI.setUser(u);
+  clearTimeout(cloudTimer);
+  if (!u) {
+    careerUid = undefined;
+    career = loadCareer();
+    lobbyUI.setCareer(career);
+    return;
+  }
+  const firstTimeHere = !hasCareer(u.uid);
+  careerUid = u.uid;
+  career = loadCareer(u.uid);
+  lobbyUI.setCareer(career);
+  void (async () => {
+    let profile: Profile | null = null;
+    try {
+      profile = await account.loadProfile();
+    } catch {
+      // can't reach the cloud right now: carry on with what this browser has for the account
+    }
+    if (careerUid !== u.uid) return; // signed out (or switched) while loading
+    if (profile?.career) career = mergeCareer(career, toCareer(profile.career));
+    else if (!profile && firstTimeHere) career = mergeCareer(career, loadCareer()); // a new account starts with the guest's progress
+    saveCareer(career, u.uid);
+    lobbyUI.setCareer(career);
+    if (typeof profile?.nickname === 'string' && profile.nickname.trim()) lobbyUI.setName(profile.nickname);
+    else if (!lobbyUI.name.trim()) lobbyUI.setName(u.name.slice(0, 16));
+    if (typeof profile?.primary === 'number') lobbyUI.setPrimary(profile.primary);
+    await account.saveProfile({ career, nickname: lobbyUI.name, primary: lobbyUI.primary }).catch(() => {});
+  })();
+});
+if (account.enabled) account.start().catch(() => accountUI.setUnavailable());
 lobbyUI.onJoin((id) => net?.sendText({ t: 'join', id }));
 const matchHud = new MatchHud();
 
@@ -567,8 +630,7 @@ function onLobbyText(text: string): void {
       matchHud.showEnd(msg.rows, msg.winner, myId, msg.nextIn);
       career.rounds++;
       if (msg.winner !== 0 && msg.winner === myId) career.wins++;
-      saveCareer(career);
-      lobbyUI.setCareer(career);
+      careerChanged();
       audio.roundEnd(msg.winner === myId);
       break;
     }

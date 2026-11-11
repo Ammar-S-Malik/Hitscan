@@ -10,23 +10,51 @@ export interface Career {
 const KEY = 'hitscan.career';
 const EMPTY: Career = { kills: 0, deaths: 0, headshots: 0, wins: 0, rounds: 0 };
 
-export function loadCareer(): Career {
+/** Cleans anything that looks like career totals (from storage or the cloud) into a Career. */
+export function toCareer(raw: unknown): Career {
+  const out = { ...EMPTY };
+  if (typeof raw !== 'object' || raw === null) return out;
+  const r = raw as Partial<Record<keyof Career, unknown>>;
+  for (const k of Object.keys(EMPTY) as Array<keyof Career>) {
+    const v = r[k];
+    if (typeof v === 'number' && Number.isFinite(v) && v >= 0) out[k] = Math.floor(v);
+  }
+  return out;
+}
+
+/**
+ * Two copies of the same account's totals (the cloud's, and this browser's, which may hold games played
+ * while the save had not gone through yet) combined: totals only ever grow, so the larger of each wins.
+ */
+export function mergeCareer(a: Career, b: Career): Career {
+  const out = { ...EMPTY };
+  for (const k of Object.keys(EMPTY) as Array<keyof Career>) out[k] = Math.max(a[k], b[k]);
+  return out;
+}
+
+/** The storage key for a signed-in account's totals in this browser; the guest's are under the plain key. */
+const keyFor = (uid?: string): string => (uid ? `${KEY}.${uid}` : KEY);
+
+export function loadCareer(uid?: string): Career {
   try {
-    const raw = JSON.parse(localStorage.getItem(KEY) ?? '{}') as Partial<Record<keyof Career, unknown>>;
-    const out = { ...EMPTY };
-    for (const k of Object.keys(EMPTY) as Array<keyof Career>) {
-      const v = raw[k];
-      if (typeof v === 'number' && Number.isFinite(v) && v >= 0) out[k] = Math.floor(v);
-    }
-    return out;
+    return toCareer(JSON.parse(localStorage.getItem(keyFor(uid)) ?? '{}'));
   } catch {
     return { ...EMPTY };
   }
 }
 
-export function saveCareer(c: Career): void {
+/** True if this browser has kept totals for that account (or for the guest) before. */
+export function hasCareer(uid?: string): boolean {
   try {
-    localStorage.setItem(KEY, JSON.stringify(c));
+    return localStorage.getItem(keyFor(uid)) !== null;
+  } catch {
+    return false;
+  }
+}
+
+export function saveCareer(c: Career, uid?: string): void {
+  try {
+    localStorage.setItem(keyFor(uid), JSON.stringify(c));
   } catch {
     // not saved: the totals still count until the page closes
   }

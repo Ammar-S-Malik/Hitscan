@@ -1,0 +1,16 @@
+rules_version = '2';
+
+// Each player can read and write only their own profile, at players/{their uid}.
+// Paste this into Firebase console > Firestore Database > Rules, then Publish.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /players/{uid} {
+      allow read, delete: if request.auth != null && request.auth.uid == uid;
+      allow create, update: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['nickname', 'primary', 'career', 'updated'])
+        && (!('nickname' in request.resource.data) || (request.resource.data.nickname is string && request.resource.data.nickname.size() <= 32))
+        && (!('primary' in request.resource.data) || request.resource.data.primary is int)
+        && (!('career' in request.resource.data) || request.resource.data.career is map);
+    }
+  }
+}

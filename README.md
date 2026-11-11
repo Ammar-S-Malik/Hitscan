@@ -20,6 +20,9 @@ and bots in Play vs AI are given random classes. Your class applies when you joi
 
 ## Play vs AI
 
+Accounts are optional: play as a guest (stats kept in your browser), or **Sign in** with Google or email to keep your
+name, class and stats on any device (Firebase; see DEPLOY.md, section 3).
+
 The lobby has a **Play vs AI** tab: pick a difficulty (Easy, Normal, Hard), 1 to 7 bots, a map, a score limit and a round length,
 then press Start. The whole match runs inside the page, using the same `GameServer` and `Match` code as the real server, so it needs
 no connection (it works while the Render server is still waking up) and has no lag. Pausing with Esc freezes the match.

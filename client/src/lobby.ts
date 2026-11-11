@@ -84,6 +84,8 @@ export class LobbyUI {
   private buttons: HTMLButtonElement[] = [];
   private joinButtons: HTMLButtonElement[] = [];
   private tab: Tab = 'mp';
+  private showClass: () => void = () => {};
+  private handlers: LobbyHandlers | null = null;
   private connected = false;
   private isError = false;
   private difficulty: AiDifficulty = 'normal';
@@ -188,19 +190,12 @@ export class LobbyUI {
       b.append(make('b', '', c.name), make('small', '', c.role), make('span', 'kit', `${w.magSize} rounds \u00b7 ${w.damage} dmg`));
       const img = picture(c.primary);
       if (img) b.append(img);
-      b.addEventListener('click', () => {
-        this.primary = c.primary;
-        try {
-          localStorage.setItem(CLASS_KEY, String(c.primary));
-        } catch {
-          // not saved: fine
-        }
-        showClass();
-        h.onClass(c.primary);
-      });
+      b.addEventListener('click', () => this.setPrimary(c.primary));
       classButtons.push(b);
       $('class-list').append(b);
     }
+    this.showClass = showClass;
+    this.handlers = h;
     showClass();
     const side = WEAPONS[SECONDARY_WEAPON];
     const sideCard = make('div', 'gcard');
@@ -210,14 +205,7 @@ export class LobbyUI {
     $('secondary-card').append(sideCard);
 
     // ---- player
-    const commitName = (): void => {
-      try {
-        localStorage.setItem(NAME_KEY, this.nickEl.value);
-      } catch {
-        // not saved: fine
-      }
-      h.onNameChange(this.nickEl.value);
-    };
+    const commitName = (): void => this.setName(this.nickEl.value);
     this.nickEl.addEventListener('change', commitName);
     this.nickEl.addEventListener('keydown', (e) => {
       e.stopPropagation();
@@ -264,6 +252,30 @@ export class LobbyUI {
     $('c-deaths').textContent = c.deaths.toLocaleString();
     $('c-kd').textContent = c.deaths > 0 ? (c.kills / c.deaths).toFixed(2) : c.kills > 0 ? c.kills.toFixed(2) : '0.00';
     $('c-wins').textContent = c.wins.toLocaleString();
+  }
+
+  /** Take up a class (as its primary gun), remember it, and tell the game. */
+  setPrimary(primary: number): void {
+    if (!isPrimary(primary)) return;
+    this.primary = primary;
+    try {
+      localStorage.setItem(CLASS_KEY, String(primary));
+    } catch {
+      // not saved: fine
+    }
+    this.showClass();
+    this.handlers?.onClass(primary);
+  }
+
+  /** Change the nickname, remember it, and tell the game. */
+  setName(name: string): void {
+    this.nickEl.value = name;
+    try {
+      localStorage.setItem(NAME_KEY, name);
+    } catch {
+      // not saved: fine
+    }
+    this.handlers?.onNameChange(name);
   }
 
   get name(): string {

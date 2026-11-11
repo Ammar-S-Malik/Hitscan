@@ -118,3 +118,22 @@ You can also point any build at another server with `?server=wss://host` in the 
 Messages per second are capped per connection (game and lobby separately), message size is capped
 at 1 KB, nicknames are cleaned, connections per address are limited, idle lobby connections are
 dropped, and a connection that keeps breaking the limits is closed.
+
+## 3. Accounts (optional, Firebase)
+
+Players can always play as guests. If a Firebase project is configured, the menu also offers **Sign in**
+(Google, or email and password), and a signed-in player's name, class and stats are saved to Firestore.
+With no Firebase settings the sign-in button simply doesn't appear.
+
+1. In the [Firebase console](https://console.firebase.google.com) create a project (Analytics is not needed).
+2. **Authentication** > Get started > Sign-in method: enable **Google** and **Email/Password**.
+3. Authentication > Settings > **Authorized domains**: add your Pages addresses, for example `hitscan.pages.dev`
+   (and `hitscan-8gk.pages.dev` or any preview address you use). `localhost` is there already.
+4. **Firestore Database** > Create database (production mode, any nearby location). Then Rules: paste the
+   contents of `firestore.rules` from this repo and Publish.
+5. Project settings > General > Your apps > add a **Web** app (no Hosting). Copy `apiKey`, `authDomain`,
+   `projectId` and `appId` into Cloudflare Pages as `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`,
+   `VITE_FIREBASE_PROJECT_ID` and `VITE_FIREBASE_APP_ID`, then redeploy. These values are public by design;
+   the Firestore rules are what keep each player's data private.
+
+The Firebase SDK is loaded from Google's CDN on page load only when these are set.
