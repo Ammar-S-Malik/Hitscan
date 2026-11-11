@@ -4,6 +4,10 @@ Hitscan is a multiplayer 3D arena shooter that runs in the browser: TypeScript, 
 authoritative Node server with client-side prediction, interpolation and a built-in network simulator.
 See the roadmap doc for the full plan.
 
+**Play it: https://hitscan.pages.dev/** (free, no sign-up; open it in two tabs or send the link to a friend to play against them).
+The game server runs on a free Render instance that sleeps when idle, so the first visit after a quiet period shows
+"Waking the server up" for up to a minute. "Practice alone (offline)" works without the server.
+
 **Status: Stage 7 (feature complete)** - movement and slide, multiplayer with an authoritative server, prediction and
 lag-compensated hits, five guns with iron sights, a lobby with timed rounds, five validated maps, soldier models,
 synthesized sound, a settings menu, a mini-map, a load test, CI, and deployment files (see `DEPLOY.md`).
