@@ -86,6 +86,9 @@ export class Interpolator {
         yaw: lerpAngle(p.yaw, q.yaw, alpha),
         sliding: alpha < 0.5 ? p.sliding : q.sliding,
         grounded: alpha < 0.5 ? p.grounded : q.grounded,
+        alive: alpha < 0.5 ? p.alive : q.alive,
+        kills: q.kills,
+        deaths: q.deaths,
       });
     }
     return { renderTime: rt, players: out };

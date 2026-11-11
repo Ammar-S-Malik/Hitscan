@@ -24,6 +24,10 @@ export class Predictor {
   errZ = 0;
   lastCorrection = 0; // metres the last snapshot moved the predicted position
   lastSeq = 0; // sequence number of the newest input sent
+  /** The input the last `tick()` actually used (quantized, and neutral while dead). */
+  lastInput: Input | null = null;
+  /** From the newest snapshot. A dead player can look around but not move or shoot. */
+  alive = true;
   private pending: SeqInput[] = [];
   private lastSnapshotTick = -1;
   private boxes: readonly Box[];
@@ -40,7 +44,8 @@ export class Predictor {
 
   /** Apply one input locally and return the packet to send to the server. */
   tick(raw: Input): Uint8Array {
-    const input = quantizeInput(raw);
+    const input = quantizeInput(this.alive ? raw : { ...raw, forward: 0, strafe: 0, jump: false, sprint: false, slide: false, fire: false });
+    this.lastInput = input;
     this.lastSeq++;
     this.pending.push({ seq: this.lastSeq, input });
     if (this.pending.length > NET.maxPending) this.pending.shift();
@@ -53,6 +58,7 @@ export class Predictor {
   onSnapshot(snap: Snapshot): void {
     if (snap.tick <= this.lastSnapshotTick) return; // old or duplicate: snapshots can arrive out of order
     this.lastSnapshotTick = snap.tick;
+    this.alive = snap.alive;
 
     let i = 0;
     while (i < this.pending.length && this.pending[i].seq <= snap.ack) i++;

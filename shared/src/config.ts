@@ -58,3 +58,20 @@ export const NET = {
   idleTimeoutTicks: 5 * TICK_RATE, // server: drop a player who sends nothing for 5 seconds
   fallLimit: -30, // server: below this height a player is respawned
 } as const;
+
+/**
+ * Combat. One weapon for now; Stage 4 turns this into a table of five guns.
+ */
+export const COMBAT = {
+  maxHealth: 100,
+  damage: 25,
+  headMultiplier: 2, // a hit in the top `headHeight` of the body does this much more damage
+  headHeight: 0.3,
+  fireIntervalTicks: 12, // 5 shots a second while the trigger is held
+  maxRange: 200,
+  respawnTicks: 3 * TICK_RATE, // how long a dead player waits
+  spawnShieldTicks: 90, // a freshly respawned player can't be hurt for this long
+  maxRewindMs: 500, // lag compensation never looks further back than this
+  historyTicks: 40, // how many ticks of player positions the server remembers (must cover maxRewindMs)
+  teleportDistance: 3, // positions further apart than this between two ticks are a respawn, not movement
+} as const;

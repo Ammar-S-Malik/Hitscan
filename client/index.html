@@ -11,6 +11,25 @@
              text-shadow: 0 1px 2px #000; pointer-events: none; white-space: pre; }
       #crosshair { position: fixed; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px;
                    border-radius: 50%; background: rgba(255,255,255,.85); box-shadow: 0 0 0 1px rgba(0,0,0,.6); pointer-events: none; }
+      #hitmarker { position: fixed; left: 50%; top: 50%; width: 28px; height: 28px; margin: -14px 0 0 -14px; opacity: 0;
+                   pointer-events: none; --c: #fff; }
+      #hitmarker::before, #hitmarker::after { content: ''; position: absolute; left: 50%; top: 50%; width: 3px; height: 28px;
+                   margin: -14px 0 0 -1.5px; background: var(--c); box-shadow: 0 0 0 1px rgba(0,0,0,.5); }
+      #hitmarker::before { transform: rotate(45deg); }
+      #hitmarker::after { transform: rotate(-45deg); }
+      #damage { position: fixed; inset: 0; opacity: 0; pointer-events: none;
+                background: radial-gradient(ellipse at center, rgba(180,0,0,0) 45%, rgba(200,0,0,.75) 100%); }
+      #vitals { position: fixed; left: 16px; bottom: 16px; color: #fff; font: 600 22px/1 ui-monospace, Consolas, monospace;
+                text-shadow: 0 1px 3px #000; pointer-events: none; }
+      #healthbar { width: 220px; height: 10px; margin-top: 8px; background: rgba(0,0,0,.5); border-radius: 5px; overflow: hidden; }
+      #healthfill { height: 100%; width: 100%; background: #5ad17a; }
+      #killfeed { position: fixed; right: 14px; top: 12px; text-align: right; color: #fff; font: 14px/1.7 ui-monospace, Consolas, monospace;
+                  text-shadow: 0 1px 3px #000; pointer-events: none; white-space: pre; }
+      #scores { position: fixed; left: 50%; top: 18%; transform: translateX(-50%); min-width: 320px; padding: 12px 18px; display: none;
+                background: rgba(10,12,16,.72); border-radius: 8px; color: #fff; font: 14px/1.7 ui-monospace, Consolas, monospace;
+                pointer-events: none; white-space: pre; }
+      #dead { position: fixed; left: 50%; top: 38%; transform: translateX(-50%); display: none; text-align: center; color: #fff;
+              font-size: 22px; text-shadow: 0 2px 6px #000; pointer-events: none; }
       #overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center;
                  color: #fff; background: rgba(10,12,16,.6); cursor: pointer; font-size: 16px; line-height: 1.8; }
       #overlay b { font-size: 24px; }
@@ -20,11 +39,18 @@
   <body>
     <div id="hud"></div>
     <div id="crosshair"></div>
+    <div id="hitmarker"></div>
+    <div id="damage"></div>
+    <div id="vitals"><div id="hp"></div><div id="healthbar"><div id="healthfill"></div></div></div>
+    <div id="killfeed"></div>
+    <div id="scores"></div>
+    <div id="dead"></div>
     <div id="overlay">
       <div>
         <b>Click to play</b><br />
         <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move &nbsp; <kbd>Mouse</kbd> look &nbsp; <kbd>Space</kbd> jump<br />
-        <kbd>Shift</kbd> sprint &nbsp; <kbd>C</kbd> slide (sprint first, then tap C) &nbsp; <kbd>R</kbd> respawn<br />
+        <kbd>Shift</kbd> sprint &nbsp; <kbd>C</kbd> slide (sprint first, then tap C) &nbsp; <kbd>R</kbd> respawn (offline)<br />
+        <kbd>Left click</kbd> shoot &nbsp; <kbd>Tab</kbd> scoreboard<br />
         <kbd>Esc</kbd> release the mouse
       </div>
     </div>

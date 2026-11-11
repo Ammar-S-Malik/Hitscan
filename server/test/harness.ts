@@ -3,9 +3,9 @@
  * a simulated network, on a virtual clock. Nothing here is mocked except the wire and time.
  */
 import {
-  DT, DelayLine, Interpolator, NET, Predictor, VirtualClock, createRng, decodeServerMessage,
+  DT, DelayLine, Interpolator, MSG, NET, Predictor, VirtualClock, createRng, decodeServerMessage,
 } from '@hitscan/shared';
-import type { GameMap, Input, LinkConfig } from '@hitscan/shared';
+import type { GameMap, Input, LinkConfig, ShotEvent, Snapshot } from '@hitscan/shared';
 import { GameServer } from '../src/game.ts';
 
 export const TICK_MS = 1000 / 60;
@@ -16,6 +16,9 @@ export class SimClient {
   interp = new Interpolator(NET.interpDelay);
   corrections: number[] = [];
   snapshotsSeen = 0;
+  events: ShotEvent[] = []; // as received, after the simulated network (so some are lost)
+  sentEvents: ShotEvent[] = []; // as the server sent them, before the network: the ground truth
+  lastSnapshot: Snapshot | null = null;
   up: DelayLine<Uint8Array>;
   down: DelayLine<Uint8Array>;
   inputFor: (tick: number) => Input;
@@ -31,7 +34,13 @@ export class SimClient {
     this.down = new DelayLine<Uint8Array>({ ...link }, rand, world.clock, (bytes) => this.receive(bytes));
     this.up = new DelayLine<Uint8Array>({ ...link }, rand, world.clock, (bytes) => world.server.onMessage(this.id, bytes));
     const id = world.server.connect({
-      send: (bytes) => this.down.send(bytes),
+      send: (bytes) => {
+        if (bytes[0] === MSG.events) {
+          const m = decodeServerMessage(bytes);
+          if (m && m.kind === 'events') this.sentEvents.push(...m.events);
+        }
+        this.down.send(bytes);
+      },
       close: () => undefined,
     });
     if (id === null) throw new Error('server full');
@@ -45,8 +54,14 @@ export class SimClient {
 
   private receive(bytes: Uint8Array): void {
     const m = decodeServerMessage(bytes);
-    if (!m || m.kind !== 'snapshot') return;
+    if (!m) return;
+    if (m.kind === 'events') {
+      this.events.push(...m.events);
+      return;
+    }
+    if (m.kind !== 'snapshot') return;
     const snap = m.snapshot;
+    this.lastSnapshot = snap;
     this.snapshotsSeen++;
     if (!this.predictor) {
       this.predictor = new Predictor(this.world.map.boxes, snap.own);

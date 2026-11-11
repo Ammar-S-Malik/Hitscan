@@ -4,8 +4,9 @@ Hitscan is a multiplayer 3D arena shooter that runs in the browser: TypeScript, 
 authoritative Node server with client-side prediction, interpolation and a built-in network simulator.
 See the roadmap doc for the full plan.
 
-**Status: Stage 2** - movement, slide, the first map, and multiplayer: several browser tabs can join
-one server and move around each other (no shooting yet; that is Stage 3).
+**Status: Stage 3** - movement, slide, the first map, multiplayer, and shooting: you can shoot other
+players, with hits judged by the server and compensated for lag. There is one gun for now; the five-gun
+selection is Stage 4.
 
 ## Setup (Windows PowerShell)
 
@@ -59,6 +60,8 @@ last server correction moved you.
 | Space | Jump |
 | Shift | Sprint |
 | C | Slide: sprint first, then tap C. Jumping out of a slide keeps your speed |
+| Left click | Shoot (hold for automatic fire) |
+| Tab | Hold to show the scoreboard |
 | R | Respawn (offline only) |
 | Esc | Release the mouse |
 
@@ -83,11 +86,29 @@ is only slide-high: slide in, and you stay crouched until you are clear of the c
   allowance), so a client can't run faster by sending inputs faster; oversized, truncated or garbage packets are
   ignored; and a connection that stops sending valid inputs for five seconds is dropped.
 
+### Shooting and lag compensation
+
+- **Hitscan:** a shot is an instant ray from your eye along where you are looking. It stops at the first wall or
+  player it meets, so walls block shots. A hit in the top 30 cm of the body is a head shot (double damage).
+- **The server decides.** The client sends only "trigger held" along with the look direction. The server finds the
+  ray, the hit, the damage and the kill. Health, deaths and respawns (3 seconds, then 1.5 seconds of spawn shield)
+  all live on the server.
+- **Fire rate is part of the input stream.** The rule "one shot per 12 inputs while held" is shared code, so your
+  client knows exactly which of its inputs the server will count as shots. Your tracer appears the instant you click, and
+  the hit marker follows when the server confirms it.
+- **Lag compensation.** What you aim at on your screen is where players were about 100 ms plus your latency ago. Each
+  input carries the server time your screen was showing. The server keeps the last 40 ticks of every player's position
+  and rewinds the other players to that moment before testing your shot, so if you aimed at them on your screen, you hit
+  them. The rewind is capped at 500 ms so a client can't claim an ancient view, and the shooter's own position is
+  never rewound.
+- **Trade-off:** with lag compensation the player who was shot can occasionally be hit just after getting behind a
+  corner on their own screen. This is the standard trade in FPS games: the shooter's view wins.
+
 ## Tuning how it feels
 
 Every movement number lives in `shared/src/config.ts` (speeds, jump, slide boost, slide length,
-cooldown, gravity), and the networking numbers (snapshot rate, jitter buffer, interpolation delay) are in the
-same file under `NET`. Change a value and save; the dev server reloads on its own (restart the server for
+cooldown, gravity), the networking numbers (snapshot rate, jitter buffer, interpolation delay) are under `NET`, and
+damage, fire rate, health, respawn time and the rewind limit are under `COMBAT`. Change a value and save; the dev server reloads on its own (restart the server for
 `NET` changes that affect it).
 
 ## Testing
@@ -99,6 +120,11 @@ same file under `NET`. Change a value and save; the dev server reloads on its ow
 - **Full client + server runs on a virtual clock** with a simulated network: a perfect network gives zero
   corrections; 100 ms latency, 20 ms jitter and 5% loss gives rare, small ones; 40% loss still converges; other
   players are drawn smoothly and without extrapolation.
+- **Shooting:** ray geometry, walls blocking shots, head shots, fire rate, kills and respawns, the spawn shield, and a
+  dead player being unable to move or shoot.
+- **Lag compensation:** a moving target is hit when the shooter claims the right moment and missed when the claim is
+  wrong, the rewind cap holds, and full client-plus-server duels at 0, 40, 100 and 150 ms latency (with jitter and
+  loss at 100 ms) land nearly every shot, against about one in ten when the rewind is switched off.
 - **Server rules:** inputs are applied once and in order, a client sending three times too fast gains nothing,
   extreme or garbage input is clamped or ignored, full servers turn players away, idle players are dropped.
 
@@ -112,6 +138,8 @@ same file under `NET`. Change a value and save; the dev server reloads on its ow
 | `shared/src/protocol.ts` | The binary wire format and input quantization |
 | `shared/src/predictor.ts` | Client-side prediction and reconciliation |
 | `shared/src/interp.ts` | Interpolation of other players |
+| `shared/src/hitscan.ts` | Shot geometry: the aim direction, ray against walls and player boxes |
+| `shared/src/combat.ts` | The trigger rule shared by client and server |
 | `shared/src/netsim.ts` | Network simulator (delay, jitter, loss) and the virtual clock used by tests |
 | `shared/maps/arena1.json` | The first map (boxes + spawn points) |
 | `server/src/game.ts` | The game server logic, with no networking in it |

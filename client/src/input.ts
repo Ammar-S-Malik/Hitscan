@@ -22,6 +22,10 @@ export class InputState {
   private jumpLatch = false;
   private slideLatch = false;
   private respawnLatch = false;
+  private fireHeld = false;
+  private fireLatch = false;
+  /** True while Tab is held: the scoreboard is shown. */
+  showScores = false;
   private canvas: HTMLElement;
 
   constructor(canvas: HTMLElement) {
@@ -29,15 +33,34 @@ export class InputState {
 
     window.addEventListener('keydown', (e) => {
       if (document.pointerLockElement !== this.canvas) return;
-      if (e.code === 'Space') e.preventDefault();
+      if (e.code === 'Space' || e.code === 'Tab') e.preventDefault();
+      if (e.code === 'Tab') this.showScores = true;
       if (e.repeat) return;
       this.keys.add(e.code);
       if (e.code === 'Space') this.jumpLatch = true;
       if (e.code === 'KeyC') this.slideLatch = true;
       if (e.code === 'KeyR') this.respawnLatch = true;
     });
-    window.addEventListener('keyup', (e) => this.keys.delete(e.code));
-    window.addEventListener('blur', () => this.keys.clear());
+    window.addEventListener('keyup', (e) => {
+      this.keys.delete(e.code);
+      if (e.code === 'Tab') this.showScores = false;
+    });
+    window.addEventListener('blur', () => {
+      this.keys.clear();
+      this.fireHeld = false;
+      this.showScores = false;
+    });
+
+    // The trigger is the left mouse button. A press and release between two ticks is latched so a
+    // quick click still fires once.
+    window.addEventListener('mousedown', (e) => {
+      if (e.button !== 0 || document.pointerLockElement !== this.canvas) return;
+      this.fireHeld = true;
+      this.fireLatch = true;
+    });
+    window.addEventListener('mouseup', (e) => {
+      if (e.button === 0) this.fireHeld = false;
+    });
 
     document.addEventListener('mousemove', (e) => {
       if (document.pointerLockElement !== this.canvas) return;
@@ -53,7 +76,11 @@ export class InputState {
     });
 
     document.addEventListener('pointerlockchange', () => {
-      if (document.pointerLockElement !== this.canvas) this.keys.clear();
+      if (document.pointerLockElement !== this.canvas) {
+        this.keys.clear();
+        this.fireHeld = false;
+        this.showScores = false;
+      }
     });
   }
 
@@ -67,9 +94,13 @@ export class InputState {
       jump: k.has('Space') || this.jumpLatch,
       sprint: k.has('ShiftLeft') || k.has('ShiftRight'),
       slide: k.has('KeyC') || this.slideLatch,
+      pitch: this.pitch,
+      fire: this.fireHeld || this.fireLatch,
+      viewMs: 0, // filled in by the caller once it knows which moment of the server's time it is looking at
     };
     this.jumpLatch = false;
     this.slideLatch = false;
+    this.fireLatch = false;
     return input;
   }
 

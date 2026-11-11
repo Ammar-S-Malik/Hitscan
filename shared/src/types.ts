@@ -21,4 +21,11 @@ export interface Input {
   jump: boolean;
   sprint: boolean;
   slide: boolean;
+  pitch: number; // looking up is positive; only used for aiming, never for movement
+  fire: boolean; // trigger held
+  /**
+   * Lag compensation: the server time, in milliseconds, that the shooter's screen was showing other
+   * players at when this input was made. Only read when `fire` is true.
+   */
+  viewMs: number;
 }

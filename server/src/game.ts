@@ -8,10 +8,10 @@
  * never takes a position from a client. Clients send only inputs.
  */
 import {
-  NET, TICK_RATE, createPlayer, decodeInputPacket, encodeReject, encodeSnapshot, encodeWelcome, step,
-  REJECT_FULL,
+  COMBAT, FireControl, NET, TICK_RATE, aimDirection, createPlayer, decodeInputPacket, encodeEvents, encodeReject,
+  encodeSnapshot, encodeWelcome, eyeHeight, step, traceShot, REJECT_FULL,
 } from '@hitscan/shared';
-import type { Box, GameMap, PlayerState, RemotePlayer, SeqInput, Spawn } from '@hitscan/shared';
+import type { Box, GameMap, Input, PlayerState, RemotePlayer, SeqInput, ShotEvent, Spawn, Target } from '@hitscan/shared';
 
 export interface Connection {
   send(data: Uint8Array): void;
@@ -37,6 +37,19 @@ interface ServerPlayer {
   lastMessageTick: number;
   processed: number;
   dropped: number;
+  health: number;
+  alive: boolean;
+  respawnAt: number; // tick at which a dead player comes back
+  shieldUntil: number; // tick until which the player can't be hurt
+  kills: number;
+  deaths: number;
+  fire: FireControl;
+}
+
+/** Where a player was at the end of one tick, for lag compensation. */
+interface HistoryEntry {
+  tick: number;
+  players: Array<Target & { alive: boolean }>;
 }
 
 export interface PlayerInfo {
@@ -45,6 +58,10 @@ export interface PlayerInfo {
   processed: number; // inputs applied so far
   dropped: number; // inputs thrown away because the queue was full
   queued: number;
+  health: number;
+  alive: boolean;
+  kills: number;
+  deaths: number;
 }
 
 export class GameServer {
@@ -54,6 +71,8 @@ export class GameServer {
   private maxPlayers: number;
   private players = new Map<number, ServerPlayer>();
   private nextId = 1;
+  private history: HistoryEntry[] = [];
+  private events: ShotEvent[] = [];
 
   constructor(opts: ServerOptions) {
     this.map = opts.map;
@@ -69,7 +88,10 @@ export class GameServer {
   inspect(id: number): PlayerInfo | null {
     const p = this.players.get(id);
     if (!p) return null;
-    return { state: p.state, lastSeq: p.lastSeq, processed: p.processed, dropped: p.dropped, queued: p.queue.length };
+    return {
+      state: p.state, lastSeq: p.lastSeq, processed: p.processed, dropped: p.dropped, queued: p.queue.length,
+      health: p.health, alive: p.alive, kills: p.kills, deaths: p.deaths,
+    };
   }
 
   /** A new connection. Returns the player id, or null if the server is full. */
@@ -98,6 +120,13 @@ export class GameServer {
       lastMessageTick: this.tickCount,
       processed: 0,
       dropped: 0,
+      health: COMBAT.maxHealth,
+      alive: true,
+      respawnAt: 0,
+      shieldUntil: this.tickCount + COMBAT.spawnShieldTicks,
+      kills: 0,
+      deaths: 0,
+      fire: new FireControl(),
     });
     conn.send(encodeWelcome({
       playerId: id,
@@ -141,6 +170,8 @@ export class GameServer {
         this.players.delete(p.id);
         continue;
       }
+      if (!p.alive && this.tickCount >= p.respawnAt) this.respawn(p);
+
       // Each player may apply one input per tick on average. The budget lets them catch up after a
       // late packet, but a client that sends inputs faster than real time simply gets them queued
       // (and the oldest thrown away), so it cannot run faster than everyone else.
@@ -161,12 +192,17 @@ export class GameServer {
         // One input per tick; extra ones only to drain a backlog down to the buffer depth.
         while (p.queue.length > 0 && p.budget >= 1 && (applied === 0 || p.queue.length > NET.inputBuffer + 1)) {
           const q = p.queue.shift()!;
-          p.state = step(p.state, q.input, this.boxes);
+          // A dead player can look around but not move or shoot (the client does the same).
+          const input: Input = p.alive
+            ? q.input
+            : { ...q.input, forward: 0, strafe: 0, jump: false, sprint: false, slide: false, fire: false };
+          p.state = step(p.state, input, this.boxes);
           p.lastSeq = q.seq;
-          p.yaw = q.input.yaw;
+          p.yaw = input.yaw;
           p.processed++;
           p.budget -= 1;
           applied++;
+          if (p.fire.tick(input.fire, p.alive)) this.shoot(p, input);
         }
         if (p.queue.length === 0) p.buffering = true; // ran dry: let it refill before moving again
       }
@@ -175,7 +211,113 @@ export class GameServer {
         p.state = createPlayer(sp.x, sp.y, sp.z);
       }
     }
+    this.recordHistory();
+    this.flushEvents();
     if (this.tickCount % NET.snapshotEvery === 0) this.broadcast();
+  }
+
+  // ------------------------------------------------------------------ combat
+
+  private respawn(p: ServerPlayer): void {
+    const sp = this.pickSpawn(p.id);
+    p.state = createPlayer(sp.x, sp.y, sp.z);
+    p.health = COMBAT.maxHealth;
+    p.alive = true;
+    p.shieldUntil = this.tickCount + COMBAT.spawnShieldTicks;
+    p.fire.reset();
+  }
+
+  /** Resolve one shot. The ray starts where the shooter is now; the targets are rewound to what the shooter saw. */
+  private shoot(shooter: ServerPlayer, input: Input): void {
+    const origin: [number, number, number] = [
+      shooter.state.x, shooter.state.y + eyeHeight(shooter.state), shooter.state.z,
+    ];
+    const dir = aimDirection(input.yaw, input.pitch);
+    const targets = this.targetsAt(input.viewMs, shooter.id);
+    const r = traceShot(origin, dir, this.boxes, targets);
+
+    let damage = 0;
+    let killed = false;
+    const victim = r.victim ? this.players.get(r.victim) : undefined;
+    if (victim && victim.alive && this.tickCount >= victim.shieldUntil) {
+      damage = Math.round(COMBAT.damage * (r.headshot ? COMBAT.headMultiplier : 1));
+      victim.health -= damage;
+      if (victim.health <= 0) {
+        victim.health = 0;
+        victim.alive = false;
+        victim.respawnAt = this.tickCount + COMBAT.respawnTicks;
+        victim.deaths++;
+        shooter.kills++;
+        killed = true;
+      }
+    }
+    this.events.push({
+      shooter: shooter.id,
+      victim: victim ? victim.id : 0,
+      headshot: r.headshot && damage > 0,
+      killed,
+      damage,
+      origin,
+      end: r.end,
+    });
+  }
+
+  private recordHistory(): void {
+    this.history.push({
+      tick: this.tickCount,
+      players: [...this.players.values()].map((p) => ({
+        id: p.id, x: p.state.x, y: p.state.y, z: p.state.z, sliding: p.state.sliding, alive: p.alive,
+      })),
+    });
+    if (this.history.length > COMBAT.historyTicks) this.history.shift();
+  }
+
+  /**
+   * Lag compensation. The shooter aimed at where other players were drawn on their screen, which was
+   * in the past by their latency plus the interpolation delay. So find where everyone was at that
+   * moment (blending between the two nearest recorded ticks, as the client does) and test the shot
+   * against those positions instead of the current ones. The rewind is capped, so a client claiming
+   * an old view can't reach further back than a legitimately laggy player could.
+   */
+  private targetsAt(viewMs: number, shooterId: number): Target[] {
+    const hist = this.history;
+    if (hist.length === 0) return [];
+    const latest = hist[hist.length - 1].tick;
+    const oldest = hist[0].tick;
+    const maxBack = (COMBAT.maxRewindMs / 1000) * TICK_RATE;
+    let tf = Number.isFinite(viewMs) ? (viewMs / 1000) * TICK_RATE : latest;
+    tf = Math.max(Math.max(oldest, latest - maxBack), Math.min(latest, tf));
+    const i0 = Math.floor(tf);
+    const i1 = Math.min(latest, i0 + 1);
+    const a = hist[i0 - oldest];
+    const b = hist[i1 - oldest];
+    if (!a || !b) return [];
+    const alpha = tf - i0;
+
+    const out: Target[] = [];
+    const inB = new Map(b.players.map((t) => [t.id, t]));
+    const seen = new Set<number>();
+    for (const pa of a.players) {
+      seen.add(pa.id);
+      const pb = inB.get(pa.id);
+      const t = pb ? blend(pa, pb, alpha) : pa;
+      if (this.isHittable(t, shooterId)) out.push(t);
+    }
+    for (const pb of b.players) if (!seen.has(pb.id) && this.isHittable(pb, shooterId)) out.push(pb);
+    return out;
+  }
+
+  private isHittable(t: Target & { alive: boolean }, shooterId: number): boolean {
+    if (t.id === shooterId || !t.alive) return false; // not the shooter, and alive when the shooter saw them
+    const now = this.players.get(t.id);
+    return now !== undefined && now.alive && this.tickCount >= now.shieldUntil; // and still hittable now
+  }
+
+  private flushEvents(): void {
+    if (this.events.length === 0) return;
+    const bytes = encodeEvents(this.events);
+    this.events = [];
+    for (const p of this.players.values()) p.conn.send(bytes);
   }
 
   private broadcast(): void {
@@ -184,6 +326,7 @@ export class GameServer {
       all.push({
         id: p.id, x: p.state.x, y: p.state.y, z: p.state.z, yaw: p.yaw,
         sliding: p.state.sliding, grounded: p.state.grounded,
+        alive: p.alive, kills: p.kills, deaths: p.deaths,
       });
     }
     for (const p of this.players.values()) {
@@ -191,6 +334,11 @@ export class GameServer {
         tick: this.tickCount,
         ack: p.lastSeq,
         own: p.state,
+        health: p.health,
+        alive: p.alive,
+        respawnTicks: p.alive ? 0 : Math.max(0, p.respawnAt - this.tickCount),
+        kills: p.kills,
+        deaths: p.deaths,
         others: all.filter((r) => r.id !== p.id),
       }));
     }
@@ -211,4 +359,18 @@ export class GameServer {
     }
     return best;
   }
+}
+
+/** Blend two recorded positions of the same player. A jump bigger than a walk is a respawn: don't blend across it. */
+function blend(a: Target & { alive: boolean }, b: Target & { alive: boolean }, alpha: number): Target & { alive: boolean } {
+  const near = alpha < 0.5 ? a : b;
+  if (a.alive !== b.alive || Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z) > COMBAT.teleportDistance) return near;
+  return {
+    id: a.id,
+    x: a.x + (b.x - a.x) * alpha,
+    y: a.y + (b.y - a.y) * alpha,
+    z: a.z + (b.z - a.z) * alpha,
+    sliding: near.sliding,
+    alive: near.alive,
+  };
 }

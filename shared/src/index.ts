@@ -6,3 +6,5 @@ export * from './protocol.ts';
 export * from './netsim.ts';
 export * from './predictor.ts';
 export * from './interp.ts';
+export * from './hitscan.ts';
+export * from './combat.ts';

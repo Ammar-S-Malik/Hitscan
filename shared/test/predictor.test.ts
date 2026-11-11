@@ -11,7 +11,7 @@ const FLAT = [box([-500, -1, -500], [500, 0, 500], 'floor')];
 const run = input({ forward: 1, sprint: true });
 
 function snapshot(tick: number, ack: number, own: Snapshot['own']): Snapshot {
-  return { tick, ack, own, others: [] };
+  return { tick, ack, own, health: 100, alive: true, respawnTicks: 0, kills: 0, deaths: 0, others: [] };
 }
 
 test('tick() predicts immediately and sends the newest inputs, numbered from 1', () => {

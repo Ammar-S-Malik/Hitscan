@@ -4,7 +4,7 @@ import { Interpolator } from '../src/interp.ts';
 import type { RemotePlayer } from '../src/protocol.ts';
 
 function at(id: number, x: number, yaw = 0, sliding = false): RemotePlayer {
-  return { id, x, y: 0, z: 0, yaw, sliding, grounded: true };
+  return { id, x, y: 0, z: 0, yaw, sliding, grounded: true, alive: true, kills: 0, deaths: 0 };
 }
 
 /** A player running at 10 m/s, snapshots every 1/30 s, each arriving `latency` ms after it was sent. */

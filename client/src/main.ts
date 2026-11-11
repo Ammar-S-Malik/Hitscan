@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 import {
-  BODY, DT, Interpolator, NET, Predictor, createPlayer, decodeServerMessage, eyeHeight, parseMap, step,
+  BODY, DT, FireControl, Interpolator, NET, Predictor, aimDirection, createPlayer, decodeServerMessage, eyeHeight,
+  parseMap, step, traceShot,
 } from '@hitscan/shared';
-import type { PlayerState, RemotePlayer, Snapshot } from '@hitscan/shared';
+import type { Input, PlayerState, RemotePlayer, ShotEvent, Snapshot, Target, Vec3 } from '@hitscan/shared';
 import arena from '../../shared/maps/arena1.json';
 import { InputState } from './input.ts';
 import { NetClient, parseNetOptions } from './net.ts';
@@ -76,6 +77,93 @@ let roundTripMs = 0;
 let snapshotCount = 0;
 let acc = 0;
 
+// ---- combat state
+let myId = 0;
+const fireControl = new FireControl(); // the same trigger rule the server uses, so we know which input fires
+let health = 100;
+let alive = true;
+let respawnTicks = 0;
+let kills = 0;
+let deaths = 0;
+let scoreRows: Array<{ id: number; kills: number; deaths: number }> = [];
+let lastRemotes: RemotePlayer[] = []; // what is drawn right now, for aiming the local tracer
+const el = (id: string): HTMLElement => document.getElementById(id) as HTMLElement;
+const hitEl = el('hitmarker');
+const damageEl = el('damage');
+const hpEl = el('hp');
+const healthFill = el('healthfill');
+const killfeedEl = el('killfeed');
+const scoresEl = el('scores');
+const deadEl = el('dead');
+let hitFlash = 0;
+let damageFlash = 0;
+const feed: Array<{ text: string; until: number }> = [];
+
+const TRACER_SECONDS = 0.14;
+const tracers: Array<{ line: THREE.Line; born: number }> = [];
+
+function spawnTracer(from: Vec3, to: Vec3, color: number): void {
+  const geometry = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(...from), new THREE.Vector3(...to)]);
+  const material = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 1 });
+  const line = new THREE.Line(geometry, material);
+  line.frustumCulled = false;
+  scene.add(line);
+  tracers.push({ line, born: performance.now() });
+}
+
+function updateTracers(nowMs: number): void {
+  for (let i = tracers.length - 1; i >= 0; i--) {
+    const t = tracers[i];
+    const age = (nowMs - t.born) / 1000;
+    if (age >= TRACER_SECONDS) {
+      scene.remove(t.line);
+      t.line.geometry.dispose();
+      (t.line.material as THREE.Material).dispose();
+      tracers.splice(i, 1);
+    } else {
+      (t.line.material as THREE.LineBasicMaterial).opacity = 1 - age / TRACER_SECONDS;
+    }
+  }
+}
+
+/** Our own shot, drawn the moment we fire instead of waiting a round trip for the server to echo it. */
+function fireLocal(state: PlayerState, aim: { yaw: number; pitch: number }): void {
+  const eyePos: Vec3 = [state.x, state.y + eyeHeight(state), state.z];
+  const dir = aimDirection(aim.yaw, aim.pitch);
+  const targets: Target[] = lastRemotes
+    .filter((r) => r.alive)
+    .map((r) => ({ id: r.id, x: r.x, y: r.y, z: r.z, sliding: r.sliding }));
+  const end = traceShot(eyePos, dir, boxes, targets).end;
+  // Start the visible line at the gun, low and to the right, so it does not hide the crosshair.
+  const right: Vec3 = [Math.cos(aim.yaw), 0, -Math.sin(aim.yaw)];
+  const muzzle: Vec3 = [
+    eyePos[0] + right[0] * 0.2 + dir[0] * 0.6,
+    eyePos[1] - 0.18 + dir[1] * 0.6,
+    eyePos[2] + right[2] * 0.2 + dir[2] * 0.6,
+  ];
+  spawnTracer(muzzle, end, 0xfff1b0);
+}
+
+function name(id: number): string {
+  return id === myId ? 'You' : `Player ${id}`;
+}
+
+function onEvents(events: ShotEvent[]): void {
+  const now = performance.now();
+  for (const e of events) {
+    if (e.shooter !== myId) spawnTracer(e.origin, e.end, 0xffc27a);
+    if (e.shooter === myId && e.victim !== 0 && e.damage > 0) {
+      hitFlash = 0.18;
+      hitEl.style.setProperty('--c', e.killed ? '#ff4545' : e.headshot ? '#ffb02e' : '#ffffff');
+    }
+    if (e.victim === myId && e.damage > 0) damageFlash = 0.7;
+    if (e.killed) {
+      feed.push({ text: `${name(e.shooter)}  \u25B8  ${name(e.victim)}${e.headshot ? '  (head)' : ''}`, until: now + 5000 });
+      if (feed.length > 6) feed.shift();
+    }
+  }
+}
+
 function goOffline(reason: string): void {
   mode = 'offline';
   note = reason;
@@ -97,6 +185,12 @@ function onSnapshot(snap: Snapshot): void {
     roundTripMs = roundTripMs === 0 ? rtt : roundTripMs * 0.8 + rtt * 0.2;
   }
   snapshotCount++;
+  health = snap.health;
+  alive = snap.alive;
+  respawnTicks = snap.respawnTicks;
+  kills = snap.kills;
+  deaths = snap.deaths;
+  scoreRows = [{ id: myId, kills: snap.kills, deaths: snap.deaths }, ...snap.others.map((o) => ({ id: o.id, kills: o.kills, deaths: o.deaths }))];
   interp.push(snap.tick * DT, snap.others, performance.now());
 }
 
@@ -117,12 +211,15 @@ const net: NetClient | null = options.offline
         const msg = decodeServerMessage(bytes);
         if (!msg) return;
         if (msg.kind === 'welcome') {
+          myId = msg.welcome.playerId;
           input.yaw = msg.welcome.yaw;
           input.pitch = 0;
           if (msg.welcome.mapName !== map.name) note = `server map "${msg.welcome.mapName}" differs from "${map.name}"`;
         } else if (msg.kind === 'reject') {
           goOffline('the server is full: playing offline');
           net?.close();
+        } else if (msg.kind === 'events') {
+          onEvents(msg.events);
         } else {
           onSnapshot(msg.snapshot);
         }
@@ -163,6 +260,7 @@ function updateRemotes(players: RemotePlayer[]): void {
   for (const r of players) {
     seen.add(r.id);
     const m = remoteMeshes.get(r.id) ?? createRemote(r.id);
+    m.visible = r.alive; // a dead player's body disappears
     m.position.set(r.x, r.y, r.z);
     m.rotation.y = r.yaw;
     m.scale.y = r.sliding ? BODY.slideHeight / BODY.standHeight : 1;
@@ -213,21 +311,30 @@ function frame(now: number): void {
     }
     acc += frameDt;
     while (acc >= DT) {
+      const raw = input.sample();
       prev = cur;
-      cur = step(cur, input.sample(), boxes);
+      cur = step(cur, raw, boxes);
+      if (fireControl.tick(raw.fire, true)) fireLocal(cur, raw);
       acc -= DT;
     }
   } else if (mode === 'online' && predictor && net) {
     acc += frameDt;
     while (acc >= DT) {
-      const packet = predictor.tick(input.sample());
+      const raw: Input = input.sample();
+      // Tell the server which moment of its time our screen was showing other players at, so it can
+      // check the shot against where they were then (lag compensation).
+      raw.viewMs = Math.round(interp.sample(performance.now()).renderTime * 1000);
+      const packet = predictor.tick(raw);
+      const used = predictor.lastInput;
+      if (used && fireControl.tick(used.fire, predictor.alive)) fireLocal(predictor.cur, used);
       sentAt.set(predictor.lastSeq, performance.now());
       if (sentAt.size > 300) sentAt.delete(sentAt.keys().next().value as number);
       net.send(packet);
       acc -= DT;
     }
     predictor.smoothErrors(frameDt);
-    updateRemotes(interp.sample(performance.now()).players);
+    lastRemotes = interp.sample(performance.now()).players;
+    updateRemotes(lastRemotes);
   }
 
   // Which state to draw: the predictor's once online, otherwise the local one.
@@ -251,7 +358,14 @@ function frame(now: number): void {
   camera.fov = fov;
   camera.updateProjectionMatrix();
 
+  updateTracers(now);
   renderer.render(scene, camera);
+
+  // Combat HUD
+  hitFlash = Math.max(0, hitFlash - frameDt);
+  damageFlash = Math.max(0, damageFlash - frameDt * 1.6);
+  hitEl.style.opacity = String(Math.min(1, hitFlash / 0.1));
+  damageEl.style.opacity = String(Math.min(1, damageFlash));
 
   hudTimer -= frameDt;
   if (hudTimer <= 0) {
@@ -269,9 +383,26 @@ function frame(now: number): void {
     } else {
       netText = `net    ${note}\n`;
     }
+    const wallNow = performance.now();
+    while (feed.length > 0 && feed[0].until < wallNow) feed.shift();
+    killfeedEl.textContent = feed.map((f) => f.text).join('\n');
+    const online = mode === 'online';
+    hpEl.textContent = online ? `${health}` : '';
+    healthFill.style.width = `${online ? health : 100}%`;
+    healthFill.style.background = health > 60 ? '#5ad17a' : health > 30 ? '#e6c449' : '#e5533d';
+    deadEl.style.display = online && !alive ? 'block' : 'none';
+    if (online && !alive) deadEl.textContent = `Eliminated. Respawning in ${(respawnTicks / 60).toFixed(1)} s`;
+    scoresEl.style.display = online && input.showScores ? 'block' : 'none';
+    if (online && input.showScores) {
+      const rows = [...scoreRows].sort((a, b) => b.kills - a.kills || a.deaths - b.deaths);
+      scoresEl.textContent =
+        'PLAYER            KILLS  DEATHS\n' +
+        rows.map((r) => `${name(r.id).padEnd(16)}  ${String(r.kills).padStart(5)}  ${String(r.deaths).padStart(6)}`).join('\n');
+    }
     hud.textContent =
       `speed  ${speed.toFixed(1)} m/s\n` +
       `slide  ${slide}\n` +
+      (online ? `score  ${kills} kills   ${deaths} deaths\n` : '') +
       `${drawCur.grounded ? 'on ground' : 'airborne'}   height ${drawCur.y.toFixed(2)} (body ${drawCur.sliding ? BODY.slideHeight : BODY.standHeight} m)\n` +
       netText +
       `${fps.toFixed(0)} fps   worst frame ${(shownWorstFrame * 1000).toFixed(0)} ms\n` +

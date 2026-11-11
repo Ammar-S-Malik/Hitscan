@@ -13,7 +13,9 @@ export function box(min: Vec3, max: Vec3, kind: BoxKind = 'wall'): Box {
   return { min, max, kind };
 }
 
-export const IDLE: Input = { forward: 0, strafe: 0, yaw: 0, jump: false, sprint: false, slide: false };
+export const IDLE: Input = {
+  forward: 0, strafe: 0, yaw: 0, jump: false, sprint: false, slide: false, pitch: 0, fire: false, viewMs: 0,
+};
 
 export function input(patch: Partial<Input> = {}): Input {
   return { ...IDLE, ...patch };
@@ -46,5 +48,8 @@ export function randomInput(rand: () => number, yaw: number): Input {
     jump: rand() < 0.04,
     sprint: rand() < 0.9,
     slide: rand() < 0.08,
+    pitch: 0,
+    fire: false,
+    viewMs: 0,
   };
 }

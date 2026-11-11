@@ -2,10 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { NET } from '../src/config.ts';
 import {
-  MSG, decodeInputPacket, decodeServerMessage, encodeInputPacket, encodeReject, encodeSnapshot, encodeWelcome,
+  MSG, decodeInputPacket, decodeServerMessage, encodeEvents, encodeInputPacket, encodeReject, encodeSnapshot, encodeWelcome,
   quantizeInput,
 } from '../src/protocol.ts';
-import type { Snapshot } from '../src/protocol.ts';
+import type { ShotEvent, Snapshot } from '../src/protocol.ts';
 import { createPlayer } from '../src/movement.ts';
 import { createRng } from '../src/netsim.ts';
 import { input } from './helpers.ts';
@@ -30,6 +30,7 @@ test('an input survives the wire exactly as quantizeInput says it will (what pre
     const raw = input({
       forward: rand() * 2 - 1, strafe: rand() * 2 - 1, yaw: (rand() - 0.5) * 20,
       jump: rand() < 0.5, sprint: rand() < 0.5, slide: rand() < 0.5,
+      pitch: (rand() - 0.5) * 4, fire: rand() < 0.5, viewMs: Math.floor(rand() * 4e9),
     });
     const decoded = decodeInputPacket(encodeInputPacket([{ seq: 4000000000 + n, input: raw }]));
     assert.ok(decoded);
@@ -70,9 +71,10 @@ test('snapshots round-trip: own state exactly, other players to float32 precisio
   const snap: Snapshot = {
     tick: 123456, ack: 99,
     own,
+    health: 65, alive: false, respawnTicks: 120, kills: 4, deaths: 9,
     others: [
-      { id: 7, x: 1.1, y: 0, z: -2.2, yaw: 0.5, sliding: true, grounded: false },
-      { id: 65535, x: -300.5, y: 1.25, z: 80, yaw: -3, sliding: false, grounded: true },
+      { id: 7, x: 1.1, y: 0, z: -2.2, yaw: 0.5, sliding: true, grounded: false, alive: true, kills: 3, deaths: 1 },
+      { id: 65535, x: -300.5, y: 1.25, z: 80, yaw: -3, sliding: false, grounded: true, alive: false, kills: 65535, deaths: 0 },
     ],
   };
   const msg = decodeServerMessage(encodeSnapshot(snap));
@@ -85,6 +87,11 @@ test('snapshots round-trip: own state exactly, other players to float32 precisio
   assert.equal(msg.snapshot.others[0].x, Math.fround(1.1));
   assert.equal(msg.snapshot.others[0].sliding, true);
   assert.equal(msg.snapshot.others[1].grounded, true);
+  assert.equal(msg.snapshot.health, 65);
+  assert.equal(msg.snapshot.alive, false);
+  assert.equal(msg.snapshot.respawnTicks, 120);
+  assert.deepStrictEqual([msg.snapshot.kills, msg.snapshot.deaths], [4, 9]);
+  assert.deepStrictEqual(msg.snapshot.others.map((o) => [o.alive, o.kills, o.deaths]), [[true, 3, 1], [false, 65535, 0]]);
 });
 
 test('welcome and reject round-trip', () => {
@@ -95,7 +102,7 @@ test('welcome and reject round-trip', () => {
 
 test('random garbage never makes a decoder throw (fuzz)', () => {
   const rand = createRng(77);
-  const types = [MSG.input, MSG.welcome, MSG.snapshot, MSG.reject, 0, 255];
+  const types = [MSG.input, MSG.welcome, MSG.snapshot, MSG.reject, MSG.events, 0, 255];
   for (let n = 0; n < 30000; n++) {
     const len = Math.floor(rand() * 130);
     const bytes = new Uint8Array(len);
@@ -104,4 +111,29 @@ test('random garbage never makes a decoder throw (fuzz)', () => {
     decodeInputPacket(bytes);
     decodeServerMessage(bytes);
   }
+});
+
+test('shot events round-trip and reject a wrong length or non-finite positions', () => {
+  const events: ShotEvent[] = [
+    { shooter: 3, victim: 9, headshot: true, killed: false, damage: 50, origin: [1.5, 1.625, -2.25], end: [10, 1.5, -20] },
+    { shooter: 65535, victim: 0, headshot: false, killed: false, damage: 0, origin: [0, 0, 0], end: [-0.5, 3, 8] },
+    { shooter: 1, victim: 2, headshot: false, killed: true, damage: 25, origin: [0, 0, 0], end: [1, 1, 1] },
+  ];
+  const bytes = encodeEvents(events);
+  assert.deepStrictEqual(decodeServerMessage(bytes), { kind: 'events', events });
+  assert.equal(decodeServerMessage(bytes.slice(0, bytes.length - 1)), null, 'truncated');
+  assert.equal(decodeServerMessage(new Uint8Array([...bytes, 0])), null, 'trailing byte');
+  const bad = bytes.slice();
+  new DataView(bad.buffer).setFloat32(2 + 6, NaN, true);
+  assert.equal(decodeServerMessage(bad), null, 'NaN position');
+});
+
+test('aim and trigger fields quantize safely: pitch is clamped, view time is a whole non-negative number', () => {
+  const q = quantizeInput(input({ pitch: 99, fire: true, viewMs: -5 }));
+  assert.equal(q.pitch, Math.fround(Math.PI / 2));
+  assert.equal(q.viewMs, 0);
+  const r = quantizeInput(input({ pitch: NaN, viewMs: Infinity }));
+  assert.equal(r.pitch, 0);
+  assert.equal(r.viewMs, 0);
+  assert.equal(quantizeInput(input({ viewMs: 1234.6 })).viewMs, 1235);
 });
