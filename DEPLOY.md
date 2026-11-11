@@ -131,9 +131,13 @@ With no Firebase settings the sign-in button simply doesn't appear.
    (and `hitscan-8gk.pages.dev` or any preview address you use). `localhost` is there already.
 4. **Firestore Database** > Create database (production mode, any nearby location). Then Rules: paste the
    contents of `firestore.rules` from this repo and Publish.
-5. Project settings > General > Your apps > add a **Web** app (no Hosting). Copy `apiKey`, `authDomain`,
-   `projectId` and `appId` into Cloudflare Pages as `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`,
-   `VITE_FIREBASE_PROJECT_ID` and `VITE_FIREBASE_APP_ID`, then redeploy. These values are public by design;
-   the Firestore rules are what keep each player's data private.
+5. Project settings > General > Your apps > add a **Web** app (no Hosting) and copy its config into
+   `client/src/firebase-config.ts` (the values are public by design; the Firestore rules keep each player's data
+   private). To use a different project without editing code, set `VITE_FIREBASE_API_KEY`,
+   `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID` and `VITE_FIREBASE_APP_ID` in Cloudflare Pages and
+   redeploy. `VITE_FIREBASE_API_KEY=off` turns accounts off.
 
-The Firebase SDK is loaded from Google's CDN on page load only when these are set.
+This repo is already set up for the Firebase project `hitscan-d91cf`, with Google and Email/Password enabled,
+`hitscan.pages.dev` and `hitscan-8gk.pages.dev` authorised, and `firestore.rules` published.
+
+The Firebase SDK is loaded from Google's CDN on page load only when accounts are on.
